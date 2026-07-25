@@ -1,30 +1,28 @@
-
 """
-从 root hints 开始
-问 root server
-看 response 是 final answer 还是 referral
-有 glue 就用 glue
-没 glue 就 nested A lookup
-处理 CNAME chain
-控制 50 attempts / 10 referral levels
-timeout
-最后返回一个 resolution result
-"""
+Iterative DNS resolver.
 
+Main idea:
+    client question
+    -> ask root
+    -> follow referral
+    -> use glue if possible
+    -> if no glue, temporarily resolve NS hostname A record
+    -> continue original question
+"""
 
 
 import socket
 import time
 from dataclasses import dataclass
 
-import helpers.myLogger as myL
-from helpers.flagOpt import dnsFlag_C as FO
+import src.helpers.myLogger as myL
+from src.helpers.flagOpt import dnsFlag_C as FO
 
 import dataStructures.dns_dataTypes as DDT
 
-import request_parser as RP
-import upstreamQuery_builder as uQb
-import rootHints_parser as RhP
+import src.request_parser as RP
+import src.upstreamQuery_builder as uQb
+import src.rootHints_parser as RhP
 
 
 log = myL.logger_C('ITERATIVE', debug=True)
@@ -39,22 +37,45 @@ class resolutionResult_DC:
 
 
 @dataclass
-class pendingTask_DC:
-  original_question: DDT.question_S
-  ns_names: list
-  current_index: int
+class _pausedTask_DC:
+    """ a paused original question while resolving no-glue NS names."""
+    original_question: DDT.question_S
+    ns_names: list
+    current_index: int
+
+
+@dataclass
+class _resolveState_DC:
+    """ all states for one client request """
+    current_question: DDT.question_S
+    current_servers: list
+    paused_tasks: list[_pausedTask_DC]
+    attempt_counter: int
+    referral_depth: int
+    start_time: float
+    total_cap: int
+
+
+@dataclass
+class _stepResult_DC:
+    """
+    result of handling one upstream response
+
+    final_result:
+        not None means resolution finished.
+
+    next_servers:
+        not empty means move to these servers next.
+    """
+    final_result: resolutionResult_DC | None
+    next_servers: list
 
 
 class iterativeResolver_C:
 
-    def __init__(self, 
+    def __init__(self,
                  root_hints: RhP.rootHints_C,
                  timeout):
-        """
-            @input: 
-            root_hints:
-            timeout: 
-        """
         self.root_hints = root_hints
         self.timeout = int(timeout)
         self.query_builder = uQb.upstreamQueryBuilder_C()
@@ -62,15 +83,24 @@ class iterativeResolver_C:
         self.max_attempts = 50
         self.max_referrals = 10
 
+    # ========= small helpers =========
+
     def _norm_name(self, name: str):
         return name.lower()
 
-    
+    def _servfail(self):
+        return resolutionResult_DC([], [], [], DDT.flag_respondCode_ENUM.SERVFAIL)
+
+    def _make_A_question(self, name: str, qclass: int):
+        """ A question for name server IP lookup """
+        return DDT.question_S(
+            qname=name,
+            qtype=DDT.dnsType_ENUM.A,
+            qclass=qclass
+        )
+
     def _get_rootServer_ips(self):
-        """
-        get root server IP4 addresses from root hints
-        order as file order
-        """
+        """get root server IPv4 addresses from root hints, in file order"""
 
         result = []
         root_ns_records = self.root_hints.get_rootNS_records()
@@ -82,35 +112,55 @@ class iterativeResolver_C:
 
         return result
 
+    def _can_continue(self, state: _resolveState_DC):
+        if state.attempt_counter >= self.max_attempts:
+            log.debug('[iterative] reach max attempts')
+            return False
+
+        if state.referral_depth >= self.max_referrals:
+            log.debug('[iterative] reach max referrals')
+            return False
+
+        if time.time() - state.start_time > state.total_cap:
+            log.debug('[iterative] total timeout')
+            return False
+
+        if len(state.current_servers) == 0:
+            log.debug('[iterative] no current servers')
+            return False
+
+        return True
+
+    # ========= upstream send, validation =========
     def _check_response(self,
-                           parser: RP.dnsParser_C,
-                           expected_txid,
-                           expected_question: DDT.question_S
-                           ):
+                        parser: RP.dnsParser_C,
+                        expected_txid,
+                        expected_question: DDT.question_S):
 
         if parser.id != expected_txid:
-            log.debug("[Upstream R] return ID not send ID")
+            log.debug('[Upstream R] return ID not send ID')
             return False
 
         flags = FO.decode(parser.flags)
 
-        if flags.QR != 1: # not response
-            log.debug("[Upstream R] QR not 1")
+        if flags.QR != 1:
+            log.debug('[Upstream R] QR not 1')
             return False
 
         if flags.Opcode != 0:
-            log.debug("[Upstream R] Opcode not 0")
+            log.debug('[Upstream R] Opcode not 0')
             return False
 
         if flags.TC != 0:
-            log.debug("[Upstream R] TC not 0")
+            log.debug('[Upstream R] TC not 0')
             return False
 
         if len(parser.questions) != 1:
-            log.debug("[Upstream R] return question not 1")
+            log.debug('[Upstream R] return question not 1')
             return False
 
         response_question = parser.questions[0]
+
         if self._norm_name(response_question.qname) != self._norm_name(expected_question.qname):
             return False
 
@@ -122,16 +172,14 @@ class iterativeResolver_C:
 
         return True
 
-
     def _ask_server(self, server_ip, question: DDT.question_S):
         """
-            send one non recursive DNS query to one upstream server.
+        send one non recursive DNS query to one upstream server.
 
         return:
-            parsered obj if success
-            None if timeout, invalid, malformed
+            parsed response if success
+            None if timeout / invalid / malformed
         """
-
         txid, query_bytes = self.query_builder.build_query(
             question.qname,
             question.qtype,
@@ -149,19 +197,18 @@ class iterativeResolver_C:
             source_port = address[1]
 
             if source_ip != server_ip:
-                log.warn('ignore response from wrong IP {}'.format(source_ip))
+                log.debug('ignore response from wrong IP {}'.format(source_ip))
                 return None
 
             if source_port != 53:
-                log.warn('ignore response from wrong port {}'.format(source_port))
+                log.debug('ignore response from wrong port {}'.format(source_port))
                 return None
 
-            # get response
             parser = RP.dnsParser_C(data=response_data)
             parser.parse()
 
             if not self._check_response(parser, txid, question):
-                log.warn('invalid upstream response from {}'.format(server_ip))
+                log.debug('invalid upstream response from {}'.format(server_ip))
                 return None
 
             return parser
@@ -175,222 +222,250 @@ class iterativeResolver_C:
         finally:
             sock.close()
 
+    # ========= answer helpers =========
 
-
-    def _has_AAanswer(self,
-                          parser: RP.dnsParser_C,
-                          question: DDT.question_S):
-        """ record respond == question name & type== """
-
+    def _has_matching_answer(self,
+                             parser: RP.dnsParser_C,
+                             question: DDT.question_S):
         for record in parser.answers:
             if self._norm_name(record.name) == self._norm_name(question.qname):
-                if record.type == question.qtype:
+                if record.rr_type == question.qtype:
                     return True
 
         return False
 
-    def _get_match_AAanswers(self, parser: RP.dnsParser_C, question: DDT.question_S):
-        """ extract want answer """
-        result = []
-
+    def _get_matching_answers(self,
+                              parser: RP.dnsParser_C,
+                              question: DDT.question_S
+                              ) -> list[DDT.resourceRecord_S]:
+        result: list[DDT.resourceRecord_S] = []
         for record in parser.answers:
             if self._norm_name(record.name) == self._norm_name(question.qname):
-                if record.type == question.qtype:
+                if record.rr_type == question.qtype:
                     result.append(record)
 
         return result
 
-    # ========== referring ===========
+    # ========= referral helpers =========
+
     def _get_nsNames_from_referral(self, parser: RP.dnsParser_C):
-        """
-            Get NS names from Authority section in wire order.
-            These names are used when referral has no usable glue.
-        """
+        """ Get NS names from authority section in wire order """
 
         result = []
 
         for record in parser.authority:
-            if record.type == DDT.dnsType_ENUM.NS:
+            if record.rr_type == DDT.dnsType_ENUM.NS:
                 result.append(record.rdata)
 
         return result
 
-    def _make_A_question(self, name: str, qclass: int):
-        """make internal A question for NS hostname lookup"""
-
-        return DDT.question_S(
-            qname=name,
-            qtype=DDT.dnsType_ENUM.A,
-            qclass=qclass
-        )
-
-    def _start_nested_ns_lookup(self, paused_tasks, current_question, ns_names):
+    def _get_glueIPs_from_referral(self, parser: RP.dnsParser_C):
         """
-        Pause current question and start resolving first NS name to A.
+        Referral with glue:
+            Authority has NS records.
+            Additional has matching A records.
         """
 
-        task = pendingTask_DC(
-            original_question=current_question,
-            ns_names=ns_names,
-            current_index=0
+        result = []
+        ns_names = self._get_nsNames_from_referral(parser)
+
+        for ns_name in ns_names:
+            for record in parser.additional:
+                if record.rr_type == DDT.dnsType_ENUM.A:
+                    if self._norm_name(record.name) == self._norm_name(ns_name):
+                        result.append(record.rdata)
+
+        return result
+
+    # ========= not glue task helpers =========
+
+    def _start_nested_lookup(self,
+                             state: _resolveState_DC,
+                             ns_names: list):
+        """
+            no glue case.
+            pause current question, then start resolving first NS hostname A record.
+        """ 
+
+        # pause original question
+        task = _pausedTask_DC(
+            original_question = state.current_question,
+            ns_names = ns_names,
+            current_index = 0
         )
 
-        paused_tasks.append(task)
+        state.paused_tasks.append(task)
 
+        # redirect to new NS look up
         ns_name = ns_names[0]
         log.debug('[iterative] no glue, lookup NS name {}'.format(ns_name))
 
-        next_question = self._make_A_question(ns_name, current_question.qclass)
-        next_servers = self._get_rootServer_ips()
+        state.current_question = self._make_A_question(ns_name, state.current_question.qclass)
+        state.current_servers = self._get_rootServer_ips()
+        state.referral_depth = state.referral_depth + 1
 
-        return next_question, next_servers
-
-    def _try_next_paused_ns(self, paused_tasks):
+    def _try_next_paused_ns(self, state: _resolveState_DC):
         """
-        Current nested NS-name lookup failed.
-        Try next NS name from the latest paused task.
+        current nested NS lookup failed.
+        Try next NS name in latest paused task.
         """
 
-        while len(paused_tasks) > 0:
-            task = paused_tasks[-1]
+        while len(state.paused_tasks) > 0:
+            task = state.paused_tasks[-1]
             task.current_index = task.current_index + 1
 
             if task.current_index < len(task.ns_names):
                 ns_name = task.ns_names[task.current_index]
                 log.debug('[iterative] try next NS name {}'.format(ns_name))
 
-                next_question = self._make_A_question(ns_name, task.original_question.qclass)
-                next_servers = self._get_rootServer_ips()
+                state.current_question = self._make_A_question(ns_name, task.original_question.qclass)
+                state.current_servers = self._get_rootServer_ips()
+                return True
 
-                return next_question, next_servers, True
+            state.paused_tasks.pop()
 
-            paused_tasks.pop()
+        return False
 
-        return None, [], False
+    def _resume_paused_question(self,
+                                state: _resolveState_DC,
+                                ns_a_answers: list[DDT.resourceRecord_S]):
+        """
+        Nested NS-name A lookup succeeded.
+        Use returned A records as next servers for paused original question.
+        """
+
+        if len(state.paused_tasks) == 0:
+            return False
+
+        task = state.paused_tasks.pop()
+        next_servers = []
+
+        for record in ns_a_answers:
+            if record.rr_type == DDT.dnsType_ENUM.A:
+                next_servers.append(record.rdata)
+
+        if len(next_servers) == 0:
+            return False
+
+        state.current_question = task.original_question
+        state.current_servers = next_servers
+        state.referral_depth = state.referral_depth + 1
+
+        return True
+
+    # ========= response handling =========
+
+    def _handle_answer(self,
+                       state: _resolveState_DC,
+                       parser: RP.dnsParser_C):
+
+        answers = self._get_matching_answers(parser, state.current_question)
+
+        # Current answer is for an internal NS hostname A lookup.
+        if len(state.paused_tasks) > 0:
+            resumed = self._resume_paused_question(state, answers)
+
+            if resumed:
+                return _stepResult_DC(None, state.current_servers)
+
+        final_result = resolutionResult_DC(
+            answers,
+            parser.authority,
+            parser.additional,
+            DDT.flag_respondCode_ENUM.NOERROR
+        )
+
+        return _stepResult_DC(final_result, [])
+
+    def _handle_referral(self,
+                         state: _resolveState_DC,
+                         parser: RP.dnsParser_C):
+
+        glue_ips = self._get_glueIPs_from_referral(parser)
+
+        # if find glue ips
+        if len(glue_ips) > 0:
+            state.referral_depth = state.referral_depth + 1
+            return _stepResult_DC(None, glue_ips)
+
+        # if no glue ip
+        ns_names = self._get_nsNames_from_referral(parser)
+
+        if len(ns_names) > 0:
+            self._start_nested_lookup(state, ns_names)
+            return _stepResult_DC(None, state.current_servers)
+
+        return _stepResult_DC(None, [])
+
+    def _handle_response(self,
+                         state: _resolveState_DC,
+                         parser: RP.dnsParser_C
+                         ) -> _stepResult_DC:
+        
+        flags = FO.decode(parser.flags)
+        rcode = flags.RCODE
+
+        if rcode == DDT.flag_respondCode_ENUM.NXDOMAIN:
+            final_result = resolutionResult_DC([], [], [], rcode)
+            return _stepResult_DC(final_result, [])
+
+        if rcode != DDT.flag_respondCode_ENUM.NOERROR:
+            return _stepResult_DC(None, [])
+
+        if self._has_matching_answer(parser, state.current_question):
+            return self._handle_answer(state, parser)
+
+        return self._handle_referral(state, parser)
+
+    # ========= main loop =========
 
     def resolve(self, question: DDT.question_S):
         """
         Main iterative resolution entry.
-
-        This first version:
-            root -> referral with glue -> next server ...
-            final answer -> return answer
-            fail -> SERVFAIL
-
-        Later we will add:
-            no-glue nested A lookup
-            CNAME chasing
-            authoritative NODATA / NXDOMAIN handling
-            caching integration
         """
 
-        attempt_counter = 0 # server asked
-        referral_depth = 0 # heigh level
-
-        paused_tasks = []
-        current_question = question
-        current_servers = self._get_rootServer_ips()
-
-        start_time = time.time()
-        total_cap = min(30, 50 * self.timeout)
+        # init reslover state
+        state = _resolveState_DC(
+            current_question = question,
+            current_servers = self._get_rootServer_ips(),
+            paused_tasks = [],
+            attempt_counter = 0,
+            referral_depth = 0,
+            start_time = time.time(),
+            total_cap = min(30, 50 * self.timeout)
+        )
 
         while True:
 
-            if attempt_counter >= self.max_attempts:
-                log.debug("[iterative] reach max attemptation ")
-                return resolutionResult_DC([], [], [], 2)
+            # check state
+            if not self._can_continue(state):
+                return self._servfail()
 
-            if referral_depth >= self.max_referrals:
-                log.debug("[iterative] reach max referral ")
-                return resolutionResult_DC([], [], [], 2)
+            tmp_nextServers = []
+            for server_ip in state.current_servers:
+                state.attempt_counter = state.attempt_counter + 1
 
-            if time.time() - start_time > total_cap:
-                log.debug("[iterative] timeout ")
-                return resolutionResult_DC([], [], [], 2)
+                parser = self._ask_server(server_ip, state.current_question)
 
-            if len(current_servers) == 0:
-                log.debug("[iterative] curr server = 0 ")
-                return resolutionResult_DC([], [], [], 2)
-
-            next_servers = []
-            for server_ip in current_servers:
-
-                attempt_counter = attempt_counter + 1
-                parser = self._ask_server(server_ip, current_question)
-
-                if parser is None: # no answer
+                if parser is None:
                     continue
+                step = self._handle_response(state, parser)
 
-                flags = FO.decode(parser.flags)
-                rcode = flags.RCODE
+                if step.final_result is not None:
+                    return step.final_result
 
-                # nx
-                if rcode == DDT.flag_respondCode_ENUM.NXDOMAIN:
-                    return resolutionResult_DC([], [], [], rcode)
-
-                # error
-                if rcode !=  DDT.flag_respondCode_ENUM.NOERROR:
-                    continue
-
-                # get answer for current question
-                if self._has_AAanswer(parser, current_question):
-                    answers = self._get_match_AAanswers(parser, current_question)
-
-                    # If current question is a nested NS-name A lookup,
-                    # use the returned A records as next servers for original question.
-                    if len(paused_tasks) > 0:
-                        pending_task = paused_tasks.pop()
-                        next_servers = []
-
-                        for record in answers:
-                            if record.type == DDT.dnsType_ENUM.A:
-                                next_servers.append(record.rdata)
-
-                        if len(next_servers) > 0:
-                            current_question = pending_task.original_question
-                            referral_depth = referral_depth + 1
-                            break
-
-                    return resolutionResult_DC(
-                        answers,
-                        parser.authority,
-                        parser.additional,
-                        0
-                    )
-
-                # Referral with glue
-                glue_ips = self._get_glueIPs_from_referral(parser)
-
-                if len(glue_ips) > 0:
-                    next_servers = glue_ips
-                    referral_depth = referral_depth + 1
+                # referral has next server ip
+                if len(step.next_servers) > 0:
+                    tmp_nextServers = step.next_servers
                     break
 
-                # No usable glue.
-                # Pause current question, then resolve referred NS hostname to A.
-                ns_names = self._get_nsNames_from_referral(parser)
-
-                if len(ns_names) > 0:
-                    current_question, next_servers = self._start_nested_ns_lookup(
-                        paused_tasks,
-                        current_question,
-                        ns_names
-                    )
-
-                    referral_depth = referral_depth + 1
-                    break
-
+            # has referral
+            if len(tmp_nextServers) > 0:
+                state.current_servers = tmp_nextServers
                 continue
 
-            if len(next_servers) == 0:
-                if len(paused_tasks) > 0:
-                    current_question, next_servers, has_next = self._try_next_paused_ns(paused_tasks)
+            # no referral
+            if self._try_next_paused_ns(state):
+                continue
 
-                    if has_next:
-                        current_servers = next_servers
-                        continue
-
-                return resolutionResult_DC([], [], [], 2)
-
-            current_servers = next_servers
-
+            return self._servfail()

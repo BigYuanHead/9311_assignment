@@ -9,7 +9,7 @@
             "name": "Python Debugger: resolver File",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "program": "${workspaceFolder}/resolver.py",
             "console": "integratedTerminal",
             "args": ["dns-assignment-resources/named.root", "2", "53000"]
         }

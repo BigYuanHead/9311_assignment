@@ -68,7 +68,7 @@ class question_S:
 @dataclass
 class resourceRecord_S:
     name: str
-    type: int
+    rr_type: int
     rr_class: int
     ttl: int
     rdlength: int

@@ -2,15 +2,15 @@
 import sys
 import socket
 
-import helpers.myLogger as myL
+import src.helpers.myLogger as myL
 
 import dataStructures.dns_dataTypes as DDT
 
-import rootHints_parser as RhP
-import request_parser as RP
-import respond_builder as RB
-import iterative_resolver as IR
-import caching
+import src.rootHints_parser as RhP
+import src.request_parser as RP
+import src.respond_builder as RB
+import src.iterative_resolver as IR
+from src import caching
 
 
 
@@ -21,6 +21,9 @@ class resolver_C:
 
     def __init__(self, root_hints_file, timeout, listen_port):
 
+        self.timeout = int(timeout)
+        self.listen_port = int(listen_port)
+        
         # root hints
         self.root_hints_file = root_hints_file
         self.root_hints = RhP.rootHints_C(root_hints_file)
@@ -32,8 +35,6 @@ class resolver_C:
         self.iterative_resolver = IR.iterativeResolver_C(self.root_hints, self.timeout)
 
         # UDP
-        self.timeout = int(timeout)
-        self.listen_port = int(listen_port)
         ## bring up UDP socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(('127.0.0.1', self.listen_port))
@@ -147,21 +148,11 @@ class resolver_C:
             try:
                 response_data = self._handle_query(query_data)
             except Exception as e:
-                log.warn('resolver warning: {}'.format(e))
-                continue
+                raise e
+                # log.warn('resolver warning: {}'.format(e))
+                # continue
 
             self.sock.sendto(response_data, client_address)
 
 
 
-def main():
-    root_hints_file = sys.argv[1]
-    timeout = sys.argv[2]
-    listen_port = sys.argv[3]
-
-    resolver = resolver_C(root_hints_file, timeout, listen_port)
-    resolver.start()
-
-
-if __name__ == '__main__':
-    main()

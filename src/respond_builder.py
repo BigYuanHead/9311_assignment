@@ -1,10 +1,10 @@
-import helpers.myLogger as myL
+import src.helpers.myLogger as myL
 
 import dataStructures.dns_dataTypes as DDT
-import helpers.bytesOpt as BO
+import src.helpers.bytesOpt as BO
 
-import rootHints_parser as RhP
-import request_parser as RP
+import src.rootHints_parser as RhP
+import src.request_parser as RP
 
 
 
@@ -74,7 +74,7 @@ class dnsResponseBuilder_C:
 
         return b''
 
-    def _build_rr(self, record):
+    def _build_rr(self, record: DDT.resourceRecord_S):
         builder = BO.byteBuilder_C()
 
         rdata_bytes = self._build_rdata(record.rr_type, record.rdata)

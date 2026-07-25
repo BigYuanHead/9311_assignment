@@ -4,7 +4,7 @@
 
 import random
 
-import helpers.bytesOpt as BO
+import src.helpers.bytesOpt as BO
 import dataStructures.dns_dataTypes as DDT
 
 

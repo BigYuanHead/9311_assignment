@@ -4,7 +4,7 @@ import sys
 import src.helpers.myLogger as myL
 
 import src.helpers.dnsDisplay as DDSP
-from src.dnsRequest_parser import dnsParser_C
+from request_parser import dnsParser_C
 
 
 def main(filename=None):

@@ -1,10 +1,10 @@
 import sys
 import os
 
-import helpers.myLogger as myL
+import src.helpers.myLogger as myL
+import src.helpers.bytesOpt as BO
 
 import dataStructures.dns_dataTypes as DDT
-import helpers.bytesOpt as BO
 
 
 class dnsParser_C:

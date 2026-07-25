@@ -12,10 +12,11 @@ import time
 import threading
 from dataclasses import replace
 
+import  dataStructures.dns_dataTypes as DDT 
 
 class cacheEntry_C:
 
-    def __init__(self, records):
+    def __init__(self, records: list[DDT.resourceRecord_S]):
         self.items = []
 
         now = time.time()
@@ -85,7 +86,7 @@ class dnsCache_C:
         with self.lock:
             self.cache[key] = entry
 
-    def put_answer_records(self, records):
+    def put_answer_records(self, records: list[DDT.resourceRecord_S]):
         """
         Simple positive answer cache.
         Later we can improve this for CNAME chain cache.
@@ -94,7 +95,7 @@ class dnsCache_C:
         groups = {}
 
         for record in records:
-            key = self._make_key(record.name, record.type, record.rr_class)
+            key = self._make_key(record.name, record.rr_type, record.rr_class)
 
             if key not in groups:
                 groups[key] = []
