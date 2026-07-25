@@ -5,11 +5,13 @@ import socket
 import helpers.myLogger as myL
 
 import dataStructures.dns_dataTypes as DDT
-import helpers.bytesOpt as BO
 
-import rootHints_parser as RHp
-import dnsRequest_parser as dRp
-import dnsRespond_builder as dRb
+import rootHints_parser as RhP
+import request_parser as RP
+import respond_builder as RB
+import iterative_resolver as IR
+import caching
+
 
 
 log = myL.logger_C('RESOLVER', debug=True)
@@ -18,17 +20,21 @@ log = myL.logger_C('RESOLVER', debug=True)
 class resolver_C:
 
     def __init__(self, root_hints_file, timeout, listen_port):
-        
-        self.root_hints_file = root_hints_file
-        self.timeout = int(timeout)
-        self.listen_port = int(listen_port)
 
-        self.root_hints = RHp.rootHints_C(root_hints_file)
+        # root hints
+        self.root_hints_file = root_hints_file
+        self.root_hints = RhP.rootHints_C(root_hints_file)
         self.root_hints.parse()
 
-        self.response_builder = dRb.dnsResponseBuilder_C()
+        # modules
+        self.response_builder = RB.dnsResponseBuilder_C()
+        self.cache = caching.dnsCache_C()
+        self.iterative_resolver = IR.iterativeResolver_C(self.root_hints, self.timeout)
 
-        # bring up UDP socket
+        # UDP
+        self.timeout = int(timeout)
+        self.listen_port = int(listen_port)
+        ## bring up UDP socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(('127.0.0.1', self.listen_port))
         log.info('Resolver listening on 127.0.0.1:{}'.format(self.listen_port))
@@ -38,8 +44,8 @@ class resolver_C:
     def _norm_name(self, name):
         return name.lower()
 
-    def _find_stage2_records(self, question: DDT.question_DC):
-        """return answers, authority, additional for Stage 2 local answers"""
+    def _find_rootHints_records(self, question: DDT.question_S):
+        """return answers, authority, additional for local answers"""
 
         answers = []
         authority = []
@@ -48,7 +54,7 @@ class resolver_C:
         qname = self._norm_name(question.qname)
 
         # QNAME ., QTYPE NS
-        if qname == '.' and question.qtype == DDT.dnsType_C.NS:
+        if qname == '.' and question.qtype == DDT.dnsType_ENUM.NS:
             answers = self.root_hints.get_rootNS_records()
 
             for ns_record in answers:
@@ -59,7 +65,7 @@ class resolver_C:
             return answers, authority, additional
 
         # QNAME root-server-name, QTYPE A
-        if question.qtype == DDT.dnsType_C.A:
+        if question.qtype == DDT.dnsType_ENUM.A:
             answers = self.root_hints.get_records_with_name(question.qname)
             return answers, authority, additional
 
@@ -67,25 +73,74 @@ class resolver_C:
 
 
     def _handle_query(self, query_data: bytes):
+        """
+            inbounce query will be processed in here
+        """
 
         # parse a query
-        parser = dRp.dnsParser_C(data=query_data)
+        parser = RP.dnsParser_C(filename=None, data=query_data)
         parser.parse()
 
         # if query question empty, return SERVFAIL
         if len(parser.questions) == 0:
             return self.response_builder.build_response(parser, [], [], [], rcode=2)
 
-        # 
         question = parser.questions[0]
-        answers, authority, additional = self._find_stage2_records(question)
 
-        # Stage 2 allowance: unanswered valid DNS query can be empty NOERROR
-        return self.response_builder.build_response(parser, answers, authority, additional, rcode=0)
+        # 1. if root require -> find in local root hints file
+        answers, authority, additional = self._find_rootHints_records(question)
+
+        if len(answers) > 0:
+            log.success('answer from root hints')
+            return self.response_builder.build_response(
+                parser,
+                answers,authority,
+                additional,
+                rcode=0
+            )
+        
+
+        # 2. if Cache?
+        cached_answers = self.cache.get(
+            question.qname,
+            question.qtype,
+            question.qclass
+        )
+
+        if cached_answers is not None:
+            log.success('cache hit')
+            return self.response_builder.build_response(
+                parser,
+                cached_answers,
+                [],
+                [],
+                rcode=0
+            )
+
+        # 3. Iterative resolver
+        log.info('NO cache, start iterative resolution')
+
+        result = self.iterative_resolver.resolve(question)
+
+        # 4. Cache positive answer
+        if result.rcode == 0 and len(result.answers) > 0:
+            self.cache.put_answer_records(result.answers)
+            log.success('answer cached')
+
+        # 5. fresh response
+        return self.response_builder.build_response(
+            parser,
+            result.answers,
+            result.authority,
+            result.additional,
+            rcode=result.rcode
+        )
 
 
     def start(self):
-        
+        """
+            bringup multi thread
+        """
         while True:
             query_data, client_address = self.sock.recvfrom(512)
 

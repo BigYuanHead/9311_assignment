@@ -53,7 +53,7 @@ class rootHints_C:
                 ttl = int(item)
 
             elif upper_item == 'IN':
-                rr_class = DDT.dnsClass_C.IN
+                rr_class = DDT.dnsClass_ENUM.IN
 
             else:
                 rr_type = upper_item
@@ -64,7 +64,7 @@ class rootHints_C:
             ttl = self.current_ttl
 
         if rr_class is None:
-            rr_class = DDT.dnsClass_C.IN
+            rr_class = DDT.dnsClass_ENUM.IN
 
         if rdata_idx is not None and rdata_idx < len(parts):
             rdata = parts[rdata_idx]
@@ -72,21 +72,21 @@ class rootHints_C:
             return
 
         if rr_type == 'NS':
-            record = DDT.rootRecord_C(
+            record = DDT.rootRecord_S(
                 owner_name,
                 ttl,
                 rr_class,
-                DDT.dnsType_C.NS,
+                DDT.dnsType_ENUM.NS,
                 rdata
             )
             self.ns_records.append(record)
 
         elif rr_type == 'A':
-            record = DDT.rootRecord_C(
+            record = DDT.rootRecord_S(
                 owner_name,
                 ttl,
                 rr_class,
-                DDT.dnsType_C.A,
+                DDT.dnsType_ENUM.A,
                 rdata
             )
             self.a_records.append(record)

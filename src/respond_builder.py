@@ -3,8 +3,8 @@ import helpers.myLogger as myL
 import dataStructures.dns_dataTypes as DDT
 import helpers.bytesOpt as BO
 
-import rootHints_parser as RHp
-import dnsRequest_parser as dRp
+import rootHints_parser as RhP
+import request_parser as RP
 
 
 
@@ -66,10 +66,10 @@ class dnsResponseBuilder_C:
         return builder.get_bytes()
 
     def _build_rdata(self, rr_type, rdata):
-        if rr_type == DDT.dnsType_C.A:
+        if rr_type == DDT.dnsType_ENUM.A:
             return self._encode_ip(rdata)
 
-        if rr_type == DDT.dnsType_C.NS:
+        if rr_type == DDT.dnsType_ENUM.NS:
             return self._encode_name(rdata)
 
         return b''
@@ -81,7 +81,7 @@ class dnsResponseBuilder_C:
 
         builder.add_bytes(self._encode_name(record.name))
         builder.add_u16(record.rr_type)
-        builder.add_u16(DDT.dnsClass_C.IN)
+        builder.add_u16(DDT.dnsClass_ENUM.IN)
         builder.add_u32(record.ttl)
         builder.add_u16(len(rdata_bytes))
         builder.add_bytes(rdata_bytes)

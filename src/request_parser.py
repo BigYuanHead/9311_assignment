@@ -9,7 +9,7 @@ import helpers.bytesOpt as BO
 
 class dnsParser_C:
 
-    def __init__(self, filename: str = None, data: bytes = None):
+    def __init__(self, filename: str|None = None, data: bytes|None = None):
 
         # feeded data or reading file
         if data is not None:
@@ -31,10 +31,10 @@ class dnsParser_C:
         self.arCount = 0
 
         # sections contents
-        self.questions: list[DDT.question_DC] = []
-        self.answers: list[DDT.resourceRecord_DC] = []
-        self.authority: list[DDT.resourceRecord_DC] = []
-        self.additional: list[DDT.resourceRecord_DC] = []
+        self.questions: list[DDT.question_S] = []
+        self.answers: list[DDT.resourceRecord_S] = []
+        self.authority: list[DDT.resourceRecord_S] = []
+        self.additional: list[DDT.resourceRecord_S] = []
 
 
     def _decode_name(self, start_pos=None):
@@ -135,28 +135,28 @@ class dnsParser_C:
         qtype = self.bo.read_u16()
         qclass = self.bo.read_u16()
 
-        return DDT.question_DC(qname, qtype, qclass)
+        return DDT.question_S(qname, qtype, qclass)
 
 
     def _parse_recordData(self, rr_type: int, rdlength: int, rdata_start: int):
         """ decode one record data """
 
         # A
-        if rr_type == DDT.dnsType_C.A and rdlength == 4: #4 bytes
+        if rr_type == DDT.dnsType_ENUM.A and rdlength == 4: #4 bytes
             ip_bytes = self.bo.data[rdata_start:rdata_start+4]
             rdata = '{}.{}.{}.{}'.format(ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3])
             return rdata
 
         # NS / CNAME / PTR
-        if rr_type in (DDT.dnsType_C.NS, 
-                       DDT.dnsType_C.CNAME, 
-                       DDT.dnsType_C.PTR) and rdlength > 0:
+        if rr_type in (DDT.dnsType_ENUM.NS, 
+                       DDT.dnsType_ENUM.CNAME, 
+                       DDT.dnsType_ENUM.PTR) and rdlength > 0:
             name, next_pos = self._decode_name(rdata_start)
             if next_pos <= rdata_start + rdlength:
                 return name
 
         # MX
-        if rr_type == DDT.dnsType_C.MX and rdlength > 2:
+        if rr_type == DDT.dnsType_ENUM.MX and rdlength > 2:
             # priority
             first_byte = self.bo.data[rdata_start]
             second_byte = self.bo.data[rdata_start + 1]
@@ -193,7 +193,7 @@ class dnsParser_C:
 
         self.bo.pos = rdata_end
 
-        return DDT.resourceRecord_DC(name, rr_type, rr_class, ttl, rdlength, rdata)
+        return DDT.resourceRecord_S(name, rr_type, rr_class, ttl, rdlength, rdata)
 
 
 
