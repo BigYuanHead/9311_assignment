@@ -105,3 +105,30 @@ class dnsCache_C:
         for key in groups:
             name, rr_type, rr_class = key
             self.put(name, rr_type, rr_class, groups[key])
+
+    def put_chain(self, question, records):
+        """
+            Save full answer chain for original client question.
+
+            Example:
+                client asks: www.a.com A
+                records:
+                    www.a.com CNAME real.b.com
+                    real.b.com A 1.2.3.4
+
+                cache key should be:
+                    (www.a.com, A, IN)
+        """
+
+        key = self._make_key(
+            question.qname,
+            question.qtype,
+            question.qclass
+        )
+
+        self.put(
+            question.qname,
+            question.qtype,
+            question.qclass,
+            records
+        )

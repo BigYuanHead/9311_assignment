@@ -2,7 +2,9 @@ import src.helpers.myLogger as myL
 
 import dataStructures.dns_dataTypes as DDT
 import src.helpers.bytesOpt as BO
+from src.helpers.flagOpt import dnsFlag_C as FO
 
+import src.request_parser as RP
 import src.rootHints_parser as RhP
 import src.request_parser as RP
 
@@ -44,17 +46,24 @@ class dnsResponseBuilder_C:
 
         return bytes(result)
 
-    def _make_flags(self, query_flags, rcode=0):
-        """build response flags"""
+    def _encode_mx(self, rdata):
+        """
+        MX rdata format:
+            2 bytes preference
+            exchange name
+        """
 
-        rd = query_flags & 0x0100
+        parts = str(rdata).split(maxsplit=1)
 
-        flags = 0
-        flags = flags | 0x8000      # QR = 1, response
-        flags = flags | rd          # copy RD from query
-        flags = flags | (rcode & 0xF)
+        preference = int(parts[0])
+        exchange = parts[1]
 
-        return flags
+        builder = BO.byteBuilder_C()
+        builder.add_u16(preference)
+        builder.add_bytes(self._encode_name(exchange))
+
+        return builder.get_bytes()
+
 
     def _build_question(self, question):
         builder = BO.byteBuilder_C()
@@ -72,6 +81,15 @@ class dnsResponseBuilder_C:
         if rr_type == DDT.dnsType_ENUM.NS:
             return self._encode_name(rdata)
 
+        if rr_type == DDT.dnsType_ENUM.CNAME:
+            return self._encode_name(rdata)
+
+        if rr_type == DDT.dnsType_ENUM.PTR:
+            return self._encode_name(rdata)
+
+        if rr_type == DDT.dnsType_ENUM.MX:
+            return self._encode_mx(rdata)
+
         return b''
 
     def _build_rr(self, record: DDT.resourceRecord_S):
@@ -81,17 +99,22 @@ class dnsResponseBuilder_C:
 
         builder.add_bytes(self._encode_name(record.name))
         builder.add_u16(record.rr_type)
-        builder.add_u16(DDT.dnsClass_ENUM.IN)
+        builder.add_u16(record.rr_class)
         builder.add_u32(record.ttl)
-        builder.add_u16(len(rdata_bytes))
+        builder.add_u16( len(rdata_bytes) )
         builder.add_bytes(rdata_bytes)
 
         return builder.get_bytes()
 
-    def build_response(self, parser, answer_records, authority_records, additional_records, rcode=0):
+    def build_response(self, 
+                       parser: RP.dnsParser_C,
+                       answer_records: list[DDT.resourceRecord_S],
+                       authority_records: list[DDT.resourceRecord_S],
+                       additional_records: list[DDT.resourceRecord_S],
+                       rcode=0):
         builder = BO.byteBuilder_C()
 
-        flags = self._make_flags(parser.flags, rcode)
+        flags = FO.make_clientResponse_flags(parser.flags, rcode)
 
         builder.add_u16(parser.id)
         builder.add_u16(flags)

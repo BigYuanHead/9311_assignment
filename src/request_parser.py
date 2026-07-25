@@ -3,6 +3,8 @@ import os
 
 import src.helpers.myLogger as myL
 import src.helpers.bytesOpt as BO
+from src.helpers.flagOpt import dnsFlag_C as FO
+
 
 import dataStructures.dns_dataTypes as DDT
 
@@ -106,22 +108,6 @@ class dnsParser_C:
         self.anCount = self.bo.read_u16()
         self.nsCount = self.bo.read_u16()
         self.arCount = self.bo.read_u16()
-
-
-    def _get_flags(self):
-        """ split flags """
-
-        flags = {}
-
-        flags['QR'] = (self.flags >> 15) & 1
-        flags['Opcode'] = (self.flags >> 11) & 0xF
-        flags['AA'] = (self.flags >> 10) & 1
-        flags['TC'] = (self.flags >> 9) & 1
-        flags['RD'] = (self.flags >> 8) & 1
-        flags['RA'] = (self.flags >> 7) & 1
-        flags['RCODE'] = self.flags & 0xF
-
-        return flags
 
 
     def _parse_question(self):

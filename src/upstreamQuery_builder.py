@@ -5,6 +5,8 @@
 import random
 
 import src.helpers.bytesOpt as BO
+from src.helpers.flagOpt import dnsFlag_C as FO
+
 import dataStructures.dns_dataTypes as DDT
 
 
@@ -55,9 +57,8 @@ class upstreamQueryBuilder_C:
         # Header
         builder.add_u16(txid)
 
-        # Flags = 0
-        # QR=0, Opcode=0, AA=0, TC=0, RD=0, RA=0, RCODE=0
-        builder.add_u16(0)
+        # Flags
+        builder.add_u16(FO.make_upstreamQuery_flags())
 
         # QDCOUNT = 1
         builder.add_u16(1)

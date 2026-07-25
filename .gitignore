@@ -1,1 +1,4 @@
 dns-assignment-resources
+
+*.pyc
+__pycache__
