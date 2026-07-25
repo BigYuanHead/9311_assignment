@@ -72,7 +72,7 @@ class nestedLookupHandler_C:
         ns_names = self._get_ns_names(parser)
 
         if len(ns_names) == 0:
-            log.debug('[nested] no NS records in authority')
+            log.debug('no NS records in authority')
             return referralResult_DC(
                 is_referral=False,
                 ns_names=[],
@@ -81,8 +81,8 @@ class nestedLookupHandler_C:
 
         glue_ips = self._get_glue_ips(parser, ns_names)
 
-        log.debug('[nested] ns names: {}'.format(ns_names))
-        log.debug('[nested] glue ips: {}'.format(glue_ips))
+        log.debug('ns names: \n{}'.format(ns_names))
+        log.debug('glue ips: \n{}'.format(glue_ips))
 
         return referralResult_DC(
             is_referral=True,
@@ -105,7 +105,7 @@ class nestedLookupHandler_C:
         self.paused_tasks.append(task)
 
         ns_name = referral.ns_names[0]
-        log.info('[nested] no glue, lookup {}'.format(ns_name))
+        log.info('no glue, lookup {}'.format(ns_name))
 
         return self._make_A_question(
             ns_name,
@@ -141,7 +141,7 @@ class nestedLookupHandler_C:
 
             if task.current_index < len(task.ns_names):
                 ns_name = task.ns_names[task.current_index]
-                log.info('[nested] try next NS name {}'.format(ns_name))
+                log.info('try next NS name {}'.format(ns_name))
 
                 next_question = self._make_A_question(
                     ns_name,

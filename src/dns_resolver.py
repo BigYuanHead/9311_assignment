@@ -102,14 +102,9 @@ class resolver_C:
         
 
         # 2. if Cache?
-        cached_answers = self.cache.get(
-            question.qname,
-            question.qtype,
-            question.qclass
-        )
-
+        cached_answers = self.cache.get_chain(question)
         if cached_answers is not None:
-            log.success('cache hit')
+            log.success('cache hit full chain')
             return self.response_builder.build_response(
                 parser,
                 cached_answers,
@@ -126,6 +121,7 @@ class resolver_C:
         # 4. Cache positive answer
         if result.rcode == 0 and len(result.answers) > 0:
             self.cache.put_answer_records(result.answers)
+            self.cache.put_chain(question, result.answers)
             log.success('answer cached')
 
         # 5. fresh response

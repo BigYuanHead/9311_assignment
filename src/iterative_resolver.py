@@ -30,7 +30,7 @@ import src.iterOpt.cname_handler as CH
 import src.iterOpt.noData_handler as NDH
 
 
-log = myL.logger_C('ITERATIVE', debug=True)
+log = myL.logger_C('', debug=True)
 
 
 @dataclass
@@ -91,19 +91,19 @@ class iterativeResolver_C:
 
     def _can_continue(self, state: resolveState_DC):
         if state.attempt_counter >= self.max_attempts:
-            log.debug('[iterative] reach max attempts')
+            log.debug('reach max attempts')
             return False
 
         if state.referral_depth >= self.max_referrals:
-            log.debug('[iterative] reach max referral depth')
+            log.debug('reach max referral depth')
             return False
 
         if time.time() - state.start_time > state.total_cap:
-            log.debug('[iterative] total timeout')
+            log.debug('total timeout')
             return False
 
         if len(state.current_servers) == 0:
-            log.debug('[iterative] no current servers')
+            log.debug('no current servers')
             return False
 
         return True
@@ -213,7 +213,7 @@ class iterativeResolver_C:
         CN_handler = CH.cnameHandler_C()
         ND_handler = NDH.nodataHandler_C()
 
-        log.info('[iterative] start resolve {} type {}'.format(
+        log.info('start resolve {} type {}'.format(
             question.qname,
             question.qtype
         ))
@@ -229,18 +229,18 @@ class iterativeResolver_C:
 
         while True:
 
-            log.debug('[iterative] current question: {} type {}'.format(
+            log.debug('current question: {} type {}'.format(
                 state.current_question.qname,
-                state.current_question.qtype
+                DDT.dnsType_ENUM.mapper[state.current_question.qtype]
             ))
-            log.debug('[iterative] current servers: {}'.format(state.current_servers))
-            log.debug('[iterative] attempts={}, referrals={}'.format(
+            log.debug('current servers: \n{}'.format(state.current_servers))
+            log.debug('attempts={}, referrals={}'.format(
                 state.attempt_counter,
                 state.referral_depth
             ))
 
             if not self._can_continue(state):
-                log.warn('[iterative] stop, cannot continue')
+                log.warn('stop, cannot continue')
                 return self._servfail()
 
             made_progress = False
@@ -252,20 +252,20 @@ class iterativeResolver_C:
 
                 state.attempt_counter = state.attempt_counter + 1
 
-                log.debug('[iterative] ask {} for {} type {}'.format(
+                log.debug('ask {} for {} type {}'.format(
                     server_ip,
                     state.current_question.qname,
-                    state.current_question.qtype
+                    DDT.dnsType_ENUM.mapper[state.current_question.qtype]
                 ))
 
                 parser = self._ask_server(server_ip, state.current_question)
 
                 if parser is None:
-                    log.debug('[iterative] no usable response from {}'.format(server_ip))
+                    log.debug('no usable response from {}'.format(server_ip))
                     continue
 
                 rcode = FO.get_rcode(parser.flags)
-                log.debug('[iterative] response from {}, rcode={}, answer={}, authority={}, additional={}'.format(
+                log.debug('response from {}, rcode={}, answer={}, authority={}, additional={}'.format(
                     server_ip,
                     rcode,
                     len(parser.answers),
@@ -274,7 +274,7 @@ class iterativeResolver_C:
                 ))
 
                 if rcode == DDT.flag_respondCode_ENUM.NXDOMAIN:
-                    log.info('[iterative] NXDOMAIN for {}'.format(state.current_question.qname))
+                    log.info('NXDOMAIN for {}'.format(state.current_question.qname))
                     return resolutionResult_DC(
                         [],
                         [],
@@ -283,7 +283,7 @@ class iterativeResolver_C:
                     )
 
                 if rcode != DDT.flag_respondCode_ENUM.NOERROR:
-                    log.debug('[iterative] skip server {}, rcode={}'.format(server_ip, rcode))
+                    log.debug('skip server {}, rcode={}'.format(server_ip, rcode))
                     continue
 
                 answers = self._get_matching_answers(
@@ -291,7 +291,7 @@ class iterativeResolver_C:
                     state.current_question
                 )
 
-                log.debug('[iterative] matching answers: {}'.format(len(answers)))
+                log.debug('matching answers: {}'.format(len(answers)))
 
                 # 1. We got matching answers.
                 if len(answers) > 0:
@@ -301,10 +301,10 @@ class iterativeResolver_C:
                         resumed, original_question, next_servers = NL_handler.resume_from_ns_answer(answers)
 
                         if resumed:
-                            log.info('[iterative] NS-name A lookup success, resume {}'.format(
+                            log.info('NS-name A lookup success, resume {}'.format(
                                 original_question.qname
                             ))
-                            log.debug('[iterative] next servers from NS A: {}'.format(next_servers))
+                            log.debug('next servers from NS A: {}'.format(next_servers))
 
                             state.current_question = original_question
                             state.current_servers = next_servers
@@ -312,13 +312,13 @@ class iterativeResolver_C:
                             made_progress = True
                             break
 
-                        log.debug('[iterative] pending NS lookup has no A answer')
+                        log.debug('pending NS lookup has no A answer')
                         continue
 
                     # 1B. This answer is for original client question.
                     final_answers = CN_handler.build_final_answers(answers)
 
-                    log.success('[iterative] final answer found for {} type {}, count={}'.format(
+                    log.success('final answer found for {} type {}, count={}'.format(
                         state.current_question.qname,
                         state.current_question.qtype,
                         len(final_answers)
@@ -355,7 +355,7 @@ class iterativeResolver_C:
                     state.current_question
                 ):
                     final_answers = CN_handler.build_final_answers([])
-                    log.info('[iterative] authoritative NODATA for {}'.format(
+                    log.info('authoritative NODATA for {}'.format(
                         state.current_question.qname
                     ))
                     return resolutionResult_DC(
@@ -372,8 +372,8 @@ class iterativeResolver_C:
 
                     # 4A. Referral with glue.
                     if len(referral.glue_ips) > 0:
-                        log.info('[iterative] referral with glue, move to next servers')
-                        log.debug('[iterative] glue servers: {}'.format(referral.glue_ips))
+                        log.info('referral with glue, move to next servers')
+                        log.debug('glue servers: \n{}'.format(referral.glue_ips))
 
                         state.current_servers = referral.glue_ips
                         state.referral_depth = state.referral_depth + 1
@@ -381,7 +381,7 @@ class iterativeResolver_C:
                         break
 
                     # 4B. Referral without glue.
-                    log.info('[iterative] referral without glue, start NS-name A lookup')
+                    log.info('referral without glue, start NS-name A lookup')
 
                     state.current_question = NL_handler.start_no_glue_lookup(
                         state.current_question,
@@ -396,7 +396,7 @@ class iterativeResolver_C:
                 continue
 
             if made_progress:
-                log.debug('[iterative] progress made, continue next round')
+                log.debug('progress made, continue next round')
                 continue
 
             # 3. Current round failed.
@@ -404,10 +404,10 @@ class iterativeResolver_C:
             has_next, next_question = NL_handler.try_next_ns_name()
 
             if has_next:
-                log.info('[iterative] try next NS-name A lookup {}'.format(next_question.qname))
+                log.info('try next NS-name A lookup {}'.format(next_question.qname))
                 state.current_question = next_question
                 state.current_servers = self._get_rootServer_ips()
                 continue
 
-            log.warn('[iterative] no useful response and no next NS name, SERVFAIL')
+            log.warn('no useful response and no next NS name, SERVFAIL')
             return self._servfail()

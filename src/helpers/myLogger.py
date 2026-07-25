@@ -30,7 +30,7 @@ class logger_C:
         self.use_color = use_color
 
     def _time_text(self):
-        return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        return datetime.now().strftime('%Y%m%d %H:%M:%S')
 
     def _location_text(self):
         """get caller file and line"""
@@ -63,10 +63,9 @@ class logger_C:
 
         level_text = self._color_text(level, level_text)
 
-        print('{} {} {} {} {}'.format(
+        print('{} {} < {} > {}'.format(
             time_text,
             level_text,
-            name_text,
             location_text,
             message
         ))

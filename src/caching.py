@@ -119,16 +119,21 @@ class dnsCache_C:
                 cache key should be:
                     (www.a.com, A, IN)
         """
-
+        entry = cacheEntry_C(records)
         key = self._make_key(
             question.qname,
             question.qtype,
             question.qclass
         )
+        self.cache[key] = entry
 
-        self.put(
+    def get_chain(self, question):
+        """
+        Get full answer chain by original client question.
+        """
+
+        return self.get(
             question.qname,
             question.qtype,
-            question.qclass,
-            records
+            question.qclass
         )
