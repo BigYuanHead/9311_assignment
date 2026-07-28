@@ -1,34 +1,31 @@
-import sys
 import struct
-import os
-from dataclasses import dataclass
 
 
 class byteReader_C:
 
     def __init__(self, data: bytes):
+        """ pointer is managed by parser """
         self.data = data
-        self.pos = 0
 
-    def read_u8(self):
-        value = self.data[self.pos]
-        self.pos = self.pos + 1
-        return value
+    def read_u8(self, pos):
+        value = self.data[pos]
+        next_pos = pos + 1
+        return value, next_pos
 
-    def read_u16(self):
-        value = struct.unpack('!H', self.data[self.pos:self.pos+2])[0]
-        self.pos = self.pos + 2
-        return value
+    def read_u16(self, pos):
+        value = struct.unpack('!H', self.data[pos:pos+2])[0]
+        next_pos = pos + 2
+        return value, next_pos
 
-    def read_u32(self):
-        value = struct.unpack('!I', self.data[self.pos:self.pos+4])[0]
-        self.pos = self.pos + 4
-        return value
+    def read_u32(self, pos):
+        value = struct.unpack('!I', self.data[pos:pos+4])[0]
+        next_pos = pos + 4
+        return value, next_pos
 
-    def read_bytes(self, length):
-        value = self.data[self.pos:self.pos+length]
-        self.pos = self.pos + length
-        return value
+    def read_bytes(self, pos, length):
+        value = self.data[pos:pos+length]
+        next_pos = pos + length
+        return value, next_pos
 
 
 

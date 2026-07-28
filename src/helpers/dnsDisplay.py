@@ -1,65 +1,62 @@
-import src.dataStructures.dns_dataTypes as DDT
+import dataStructures.dns_dataTypes as DDT
 
 
 class dnsDisplay_C:
 
-    def __init__(self, parser):
-        self.parser = parser
+    def __init__(self, request: DDT.dns_request_S):
+        self.request = request
 
     def _type_name(self, t: int):
-        if t in DDT.dnsType_C.mapper:
-            return DDT.dnsType_C.mapper[t]
+        """ incase unknow type name happened """
+        if t in DDT.dnsType_ENUM.mapper:
+            return DDT.dnsType_ENUM.mapper[t]
         else:
-            return 'TYPE{}'.format(t)
+            return 'TYPE: {}'.format(t)
 
     def _class_name(self, c: int):
-        if c in DDT.dnsClass_C.mapper:
-            return DDT.dnsClass_C.mapper[c]
+        """ incase unknow class happened """
+        if c in DDT.dnsClass_ENUM.mapper:
+            return DDT.dnsClass_ENUM.mapper[c]
         else:
-            return 'CLASS{}'.format(c)
+            return 'CLASS: {}'.format(c)
 
-    def _rcode_name(self, rcode: int):
-        if rcode == 0:
-            return 'NOERROR'
-        elif rcode == 2:
-            return 'SERVFAIL'
-        elif rcode == 3:
-            return 'NXDOMAIN'
-        else:
-            return 'RCODE{}'.format(rcode)
 
     def _print_flags(self):
-        flags = self.parser._get_flags()
+        flags = self.request.header.flag_readable
+        id = self.request.header.id
 
-        print('ID: {}'.format(self.parser.id))
+        print('ID: {}'.format(id))
         print('--- FLAGS ---')
-        print('QR: {}'.format(bool(flags['QR'])))
-        print('Opcode: {}'.format(flags['Opcode']))
-        print('AA: {}'.format(bool(flags['AA'])))
-        print('TC: {}'.format(bool(flags['TC'])))
-        print('RD: {}'.format(bool(flags['RD'])))
-        print('RA: {}'.format(bool(flags['RA'])))
-        print('RCODE: {}'.format(self._rcode_name(flags['RCODE'])))
+        print('QR: {}'.format(bool(flags.QR)))
+        print('Opcode: {}'.format(flags.Opcode))
+        print('AA: {}'.format(bool(flags.AA)))
+        print('TC: {}'.format(bool(flags.TC)))
+        print('RD: {}'.format(bool(flags.RD)))
+        print('RA: {}'.format(bool(flags.RA)))
+        print('RCODE: {}'.format(DDT.flag_respondCode_ENUM.mapper[flags.RCODE]))
+        print()
 
     def _print_counts(self):
         print('--- COUNTS ---')
-        print('Questions: {}'.format(self.parser.qdCount))
-        print('Answers: {}'.format(self.parser.anCount))
-        print('Authority: {}'.format(self.parser.nsCount))
-        print('Additional: {}'.format(self.parser.arCount))
+        print('Questions: {}'.format(self.request.header.qdCount))
+        print('Answers: {}'.format(self.request.header.anCount))
+        print('Authority: {}'.format(self.request.header.nsCount))
+        print('Additional: {}'.format(self.request.header.arCount))
+        print()
 
     def _print_questions(self):
         print('--- QUESTIONS ---')
 
-        for q in self.parser.questions:
+        for q in self.request.questions:
             line = '{} {} {}'.format(
                 q.qname,
                 self._class_name(q.qclass),
                 self._type_name(q.qtype)
             )
             print(line)
+        print()
 
-    def _print_rr_list(self, title: str, rr_list: list[DDT.resourceRecord_DC]):
+    def _print_rr_list(self, title: str, rr_list: list[DDT.a_rr_S]):
         print(title)
 
         for rr in rr_list:
@@ -71,11 +68,12 @@ class dnsDisplay_C:
                 rr.rdata
             )
             print(line)
+        print()
 
     def display(self):
         self._print_flags()
         self._print_counts()
         self._print_questions()
-        self._print_rr_list('--- ANSWERS ---', self.parser.answers)
-        self._print_rr_list('--- AUTHORITY ---', self.parser.authority)
-        self._print_rr_list('--- ADDITIONAL ---', self.parser.additional)
+        self._print_rr_list('--- ANSWERS ---', self.request.answers)
+        self._print_rr_list('--- AUTHORITY ---', self.request.authority)
+        self._print_rr_list('--- ADDITIONAL ---', self.request.additional)

@@ -73,6 +73,8 @@ class header_S:
     nsCount: int = 0    # NSCOUNT
     arCount: int = 0    # ARCOUNT
 
+    flag_readable: flag_S
+
 
 # ----------------- DNS question and resource record -----------------
 @dataclass

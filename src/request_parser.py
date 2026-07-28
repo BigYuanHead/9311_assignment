@@ -15,16 +15,22 @@ import dataStructures.dns_dataTypes as DDT
 
 myL.logger_C('', debug=Gcfg.LOGGER_DEBUG)
 
+class malformedDNSPacket_E(Exception):
+    """ malformed packet handle  """
+    pass
+
 
 class dnsParser_C:
 
-    def __init__(self, 
+    def __init__(self,
                  filename: str|None = None,
                  data: bytes|None = None):
         """
             @input:
                 file or a byte series
 
+            !! only parse once !! 
+            Destroy it when finfish
         """
         # feeded data or reading file
         if data is not None:
@@ -34,6 +40,8 @@ class dnsParser_C:
             with open(filename, 'rb') as file:
                 self.data = file.read()
 
+        self.pointer = 0 # parser manage byte pointer
+        
         self.bo = BO.byteReader_C(self.data)
         self.request = DDT.dns_request_S()
 
@@ -59,42 +67,52 @@ class dnsParser_C:
         """
 
         if start_pos is None:
-            tmp_pos = self.bo.pos
+            tmp_pos = self.pointer
         else:
             tmp_pos = start_pos
 
+        # limitation
+        pointerJump_counter = 0
+        visited_offsets = set() # log jumper visited 
         labels = []
 
         while True:
-            length = self.bo.data[tmp_pos]
+            length = self.data[tmp_pos]
             tmp_pos = tmp_pos + 1 # move out from the length byte
 
-            # end of name
+            # end of name 00
             if length == 0:
                 break
 
             # handle compression pointer C0 xx
             if length & 0xC0 == 0xC0: # hit compression pointer
-                pointer = ((length & 0x3F) << 8) | self.bo.data[tmp_pos] # offset calcu
+                pointer_jumpTo = ((length & 0x3F) << 8) | self.data[tmp_pos] # offset calcu
                 tmp_pos += 1 # skip 0x0C
-                pointed_name, _ = self._decode_name(pointer)
+                pointed_name, _ = self._decode_name(pointer_jumpTo)
                 if pointed_name != '.':
-                    labels.extend(pointed_name[:-1].split('.'))
+                    labels.extend(pointed_name[:-1].split('.')) # remove the last .
                 break
 
-            # simple normal label only
+            # handle 01 10
+            if length & 0xC0 != 0:
+                raise ValueError('reserved DNS label form')
+            
+            # normal label
             label_bytes = self.bo.data[tmp_pos:tmp_pos+length]
             label = label_bytes.decode(errors='replace') # decode as ASCII
             labels.append(label)
-            tmp_pos = tmp_pos + length # shift pos to next label
 
+            # shift pos to next label
+            tmp_pos = tmp_pos + length
+
+        # root
         if len(labels) == 0:
             name = '.'
-        else:
+        else: # non root
             name = '.'.join(labels) + '.'
 
         if start_pos is None:
-            self.bo.pos = tmp_pos
+            self.pointer = tmp_pos
 
         return name, tmp_pos
 
@@ -106,21 +124,26 @@ class dnsParser_C:
         """
         _header = self.request.header
 
-        _header.id = self.bo.read_u16()
-        _header.flags = self.bo.read_u16()
+        _header.id, _np = self.bo.read_u16(self.pointer)
+        _header.flags, _np = self.bo.read_u16(_np)
+        _header.flag_readable = FO.decode(_header.flags)
 
-        _header.qdCount = self.bo.read_u16()
-        _header.anCount = self.bo.read_u16()
-        _header.nsCount = self.bo.read_u16()
-        _header.arCount = self.bo.read_u16()
+        _header.qdCount, _np = self.bo.read_u16(_np)
+        _header.anCount, _np = self.bo.read_u16(_np)
+        _header.nsCount, _np = self.bo.read_u16(_np)
+        _header.arCount, _np = self.bo.read_u16(_np)
+
+        self.pointer = _np # update
 
 
     def _parse_question(self) -> DDT.a_question_S:
         """ one question """
 
-        qname, _ = self._decode_name() # QNAME
-        qtype = self.bo.read_u16()  # QTYPE
-        qclass = self.bo.read_u16() # QCLASS
+        qname, _np = self._decode_name() # QNAME
+        qtype, _np = self.bo.read_u16(_np)  # QTYPE
+        qclass, _np = self.bo.read_u16(_np) # QCLASS
+
+        self.pointer = _np # update
 
         return DDT.a_question_S(qname, qtype, qclass)
 
@@ -168,21 +191,22 @@ class dnsParser_C:
 
         tmp_rr = DDT.a_rr_S()
 
-        tmp_rr.name, _ = self._decode_name() # NAME
+        tmp_rr.name, _np = self._decode_name() # NAME
 
-        tmp_rr.type = self.bo.read_u16() # TYPE
-        tmp_rr.rr_class = self.bo.read_u16() # CLASS
-        tmp_rr.ttl = self.bo.read_u32() # TTL
-        tmp_rr.rdlength = self.bo.read_u16() # RDLENGTH
+        tmp_rr.type, _np = self.bo.read_u16(_np) # TYPE
+        tmp_rr.rr_class, _np = self.bo.read_u16(_np) # CLASS
+        tmp_rr.ttl, _np = self.bo.read_u32(_np) # TTL
+        tmp_rr.rdlength, _np = self.bo.read_u16(_np) # RDLENGTH
 
         # decode record data
-        rdata_start = self.bo.pos
+        rdata_start = self.pointer
         rdata_end = rdata_start + tmp_rr.rdlength
+        self.pointer = rdata_end
 
         tmp_rr.rdata = self._parse_recordData(tmp_rr.type,
                                        tmp_rr.rdlength,
                                        rdata_start)
-        self.bo.pos = rdata_end
+        
 
         return tmp_rr
 
@@ -215,7 +239,3 @@ class dnsParser_C:
             self.request.additional.append(rr)
 
         return self.request
-
-
-
-
