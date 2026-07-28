@@ -16,7 +16,7 @@ import  dataStructures.dns_dataTypes as DDT
 
 class cacheEntry_C:
 
-    def __init__(self, records: list[DDT.resourceRecord_S]):
+    def __init__(self, records: list[DDT.a_rr_S]):
         self.items = []
 
         now = time.time()
@@ -86,7 +86,7 @@ class dnsCache_C:
         with self.lock:
             self.cache[key] = entry
 
-    def put_answer_records(self, records: list[DDT.resourceRecord_S]):
+    def put_answer_records(self, records: list[DDT.a_rr_S]):
         """
         Simple positive answer cache.
         Later we can improve this for CNAME chain cache.

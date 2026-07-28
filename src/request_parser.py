@@ -1,18 +1,31 @@
 import sys
 import os
 
+# cfg
+import configs.global_cfg as Gcfg
+
+# src files
 import src.helpers.myLogger as myL
 import src.helpers.bytesOpt as BO
 from src.helpers.flagOpt import dnsFlag_C as FO
 
-
+# ds
 import dataStructures.dns_dataTypes as DDT
+
+
+myL.logger_C('', debug=Gcfg.LOGGER_DEBUG)
 
 
 class dnsParser_C:
 
-    def __init__(self, filename: str|None = None, data: bytes|None = None):
+    def __init__(self, 
+                 filename: str|None = None,
+                 data: bytes|None = None):
+        """
+            @input:
+                file or a byte series
 
+        """
         # feeded data or reading file
         if data is not None:
             self.data = data
@@ -22,32 +35,22 @@ class dnsParser_C:
                 self.data = file.read()
 
         self.bo = BO.byteReader_C(self.data)
-
-        # header section fields
-        self.id = 0
-        self.flags = 0
-
-        self.qdCount = 0
-        self.anCount = 0
-        self.nsCount = 0
-        self.arCount = 0
-
-        # sections contents
-        self.questions: list[DDT.question_S] = []
-        self.answers: list[DDT.resourceRecord_S] = []
-        self.authority: list[DDT.resourceRecord_S] = []
-        self.additional: list[DDT.resourceRecord_S] = []
+        self.request = DDT.dns_request_S()
 
 
-    def _decode_name(self, start_pos=None):
+
+    def _decode_name(self, start_pos=None) -> tuple[str, int]:
         """
             decode DNS name
 
-            return:
-                name, next_pos
+            @input:
+                start_pos: pointer start position
 
+            @return:
+                name: ...
+                next_pos: pointer next position
                 
-            1. handle compression pointer C0 xx
+            
             2. avoid pointer loop
             3. limit pointer jump <= 20
             4. reject 01 / 10 reserved label forms
@@ -70,6 +73,7 @@ class dnsParser_C:
             if length == 0:
                 break
 
+            # handle compression pointer C0 xx
             if length & 0xC0 == 0xC0: # hit compression pointer
                 pointer = ((length & 0x3F) << 8) | self.bo.data[tmp_pos] # offset calcu
                 tmp_pos += 1 # skip 0x0C
@@ -100,31 +104,32 @@ class dnsParser_C:
             12 bytes header 
             ID FLAGS QDCOUNT ANCOUNT NSCOUNT ARCOUNT
         """
+        _header = self.request.header
 
-        self.id = self.bo.read_u16()
-        self.flags = self.bo.read_u16()
+        _header.id = self.bo.read_u16()
+        _header.flags = self.bo.read_u16()
 
-        self.qdCount = self.bo.read_u16()
-        self.anCount = self.bo.read_u16()
-        self.nsCount = self.bo.read_u16()
-        self.arCount = self.bo.read_u16()
-
-
-    def _parse_question(self):
-        """ 
-            one question
-
-            QNAME QTYPE QCLASS
-        """
-
-        qname, _ = self._decode_name()
-        qtype = self.bo.read_u16()
-        qclass = self.bo.read_u16()
-
-        return DDT.question_S(qname, qtype, qclass)
+        _header.qdCount = self.bo.read_u16()
+        _header.anCount = self.bo.read_u16()
+        _header.nsCount = self.bo.read_u16()
+        _header.arCount = self.bo.read_u16()
 
 
-    def _parse_recordData(self, rr_type: int, rdlength: int, rdata_start: int):
+    def _parse_question(self) -> DDT.a_question_S:
+        """ one question """
+
+        qname, _ = self._decode_name() # QNAME
+        qtype = self.bo.read_u16()  # QTYPE
+        qclass = self.bo.read_u16() # QCLASS
+
+        return DDT.a_question_S(qname, qtype, qclass)
+
+
+    def _parse_recordData(self,
+                          rr_type: int,
+                          rdlength: int,
+                          rdata_start: int
+                          )-> str:
         """ decode one record data """
 
         # A
@@ -157,58 +162,59 @@ class dnsParser_C:
         return 'RDLENGTH {}'.format(rdlength)
 
 
-    def _parse_resourceRecord(self):
-        """ 
-            one resource record
 
-            NAME, TYPE, CLASS, TTL, RDLENGTH, RDATA
-        """
+    def _parse_resourceRecord(self)-> DDT.a_rr_S:
+        """ one resource record """
 
-        name, _ = self._decode_name()
+        tmp_rr = DDT.a_rr_S()
 
-        rr_type = self.bo.read_u16()
-        rr_class = self.bo.read_u16()
-        ttl = self.bo.read_u32()
-        rdlength = self.bo.read_u16()
+        tmp_rr.name, _ = self._decode_name() # NAME
+
+        tmp_rr.type = self.bo.read_u16() # TYPE
+        tmp_rr.rr_class = self.bo.read_u16() # CLASS
+        tmp_rr.ttl = self.bo.read_u32() # TTL
+        tmp_rr.rdlength = self.bo.read_u16() # RDLENGTH
 
         # decode record data
         rdata_start = self.bo.pos
-        rdata_end = rdata_start + rdlength
+        rdata_end = rdata_start + tmp_rr.rdlength
 
-        rdata = self._parse_recordData(rr_type, rdlength, rdata_start)
-
+        tmp_rr.rdata = self._parse_recordData(tmp_rr.type,
+                                       tmp_rr.rdlength,
+                                       rdata_start)
         self.bo.pos = rdata_end
 
-        return DDT.resourceRecord_S(name, rr_type, rr_class, ttl, rdlength, rdata)
+        return tmp_rr
 
 
 
-    def parse(self):
+    def parse(self) -> DDT.dns_request_S:
         """ parse full DNS message """
 
+        # header
         self._parse_header()
 
         # questions
-        for idx in range(self.qdCount):
+        for _ in range(self.request.header.qdCount):
             question = self._parse_question()
-            self.questions.append(question)
+            self.request.questions.append(question)
 
         # answers
-        for idx in range(self.anCount):
+        for _ in range(self.request.header.anCount):
             rr = self._parse_resourceRecord()
-            self.answers.append(rr)
+            self.request.answers.append(rr)
 
         # authority
-        for idx in range(self.nsCount):
+        for _ in range(self.request.header.nsCount):
             rr = self._parse_resourceRecord()
-            self.authority.append(rr)
+            self.request.authority.append(rr)
 
         # additional
-        for idx in range(self.arCount):
+        for _ in range(self.request.header.arCount):
             rr = self._parse_resourceRecord()
-            self.additional.append(rr)
+            self.request.additional.append(rr)
 
-
+        return self.request
 
 
 

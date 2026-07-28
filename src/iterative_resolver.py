@@ -45,7 +45,7 @@ class resolutionResult_DC:
 
 @dataclass
 class resolveState_DC:
-    current_question: DDT.question_S
+    current_question: DDT.a_question_S
     current_servers: list
     attempt_counter: int
     referral_depth: int
@@ -111,7 +111,7 @@ class iterativeResolver_C:
     def _check_response(self,
                         parser: RP.dnsParser_C,
                         expected_txid,
-                        expected_question: DDT.question_S):
+                        expected_question: DDT.a_question_S):
 
         if parser.id != expected_txid:
             log.debug('[upstream] txid not match')
@@ -139,7 +139,7 @@ class iterativeResolver_C:
 
         return True
 
-    def _ask_server(self, server_ip, question: DDT.question_S):
+    def _ask_server(self, server_ip, question: DDT.a_question_S):
         txid, query_bytes = self.query_builder.build_query(
             question.qname,
             question.qtype,
@@ -185,7 +185,7 @@ class iterativeResolver_C:
 
     def _get_matching_answers(self,
                               parser: RP.dnsParser_C,
-                              question: DDT.question_S):
+                              question: DDT.a_question_S):
         result = []
 
         for record in parser.answers:
@@ -195,7 +195,7 @@ class iterativeResolver_C:
 
         return result
 
-    def resolve(self, question: DDT.question_S):
+    def resolve(self, question: DDT.a_question_S):
         """
         Main iterative resolver.
 

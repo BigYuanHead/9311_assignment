@@ -45,7 +45,7 @@ class resolver_C:
     def _norm_name(self, name):
         return name.lower()
 
-    def _find_rootHints_records(self, question: DDT.question_S):
+    def _find_rootHints_records(self, question: DDT.a_question_S):
         """return answers, authority, additional for local answers"""
 
         answers = []

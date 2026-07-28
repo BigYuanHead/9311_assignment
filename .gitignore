@@ -1,6 +1,7 @@
 dns-assignment-resources
 
-*.pyc
 
 __pycache__/
 .vscode/
+
+*.pyc

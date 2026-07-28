@@ -17,7 +17,7 @@ class referralResult_DC:
 
 @dataclass
 class pausedTask_DC:
-    original_question: DDT.question_S
+    original_question: DDT.a_question_S
     ns_names: list
     current_index: int
 
@@ -42,7 +42,7 @@ class nestedLookupHandler_C:
         return name.lower()
 
     def _make_A_question(self, name: str, qclass: int):
-        return DDT.question_S(
+        return DDT.a_question_S(
             qname=name,
             qtype=DDT.dnsType_ENUM.A,
             qclass=qclass
@@ -94,7 +94,7 @@ class nestedLookupHandler_C:
         return len(self.paused_tasks) > 0
 
     def start_no_glue_lookup(self,
-                             current_question: DDT.question_S,
+                             current_question: DDT.a_question_S,
                              referral: referralResult_DC):
         task = pausedTask_DC(
             original_question=current_question,

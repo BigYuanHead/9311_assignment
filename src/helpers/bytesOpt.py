@@ -34,6 +34,7 @@ class byteReader_C:
 
 class byteBuilder_C:
     """
+        build a byte series
         e.g.
         
         builder.add_u16(query_id)

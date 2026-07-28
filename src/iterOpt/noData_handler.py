@@ -25,7 +25,7 @@ class nodataHandler_C:
 
     def _has_requested_type(self,
                             parser: RP.dnsParser_C,
-                            question: DDT.question_S):
+                            question: DDT.a_question_S):
         for record in parser.answers:
             if self._norm_name(record.name) == self._norm_name(question.qname):
                 if record.rr_type == question.qtype:
@@ -35,7 +35,7 @@ class nodataHandler_C:
 
     def _has_cname(self,
                    parser: RP.dnsParser_C,
-                   question: DDT.question_S):
+                   question: DDT.a_question_S):
         for record in parser.answers:
             if self._norm_name(record.name) == self._norm_name(question.qname):
                 if record.rr_type == DDT.dnsType_ENUM.CNAME:
@@ -45,7 +45,7 @@ class nodataHandler_C:
 
     def is_authoritative_nodata(self,
                                 parser: RP.dnsParser_C,
-                                question: DDT.question_S):
+                                question: DDT.a_question_S):
         flags = FO.decode(parser.flags)
 
         if flags.RCODE != DDT.flag_respondCode_ENUM.NOERROR:

@@ -27,7 +27,7 @@ class cnameHandler_C:
 
     def find_cname(self,
                    parser: RP.dnsParser_C,
-                   question: DDT.question_S):
+                   question: DDT.a_question_S):
         for record in parser.answers:
             if self._norm_name(record.name) == self._norm_name(question.qname):
                 if record.rr_type == DDT.dnsType_ENUM.CNAME:
@@ -51,7 +51,7 @@ class cnameHandler_C:
 
     def chase(self,
               cname_record,
-              current_question: DDT.question_S):
+              current_question: DDT.a_question_S):
         self.cname_chain.append(cname_record)
 
         self.visited_names.add(
@@ -65,7 +65,7 @@ class cnameHandler_C:
             target_name
         ))
 
-        return DDT.question_S(
+        return DDT.a_question_S(
             qname=target_name,
             qtype=current_question.qtype,
             qclass=current_question.qclass

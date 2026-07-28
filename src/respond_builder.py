@@ -92,7 +92,7 @@ class dnsResponseBuilder_C:
 
         return b''
 
-    def _build_rr(self, record: DDT.resourceRecord_S):
+    def _build_rr(self, record: DDT.a_rr_S):
         builder = BO.byteBuilder_C()
 
         rdata_bytes = self._build_rdata(record.rr_type, record.rdata)
@@ -108,9 +108,9 @@ class dnsResponseBuilder_C:
 
     def build_response(self, 
                        parser: RP.dnsParser_C,
-                       answer_records: list[DDT.resourceRecord_S],
-                       authority_records: list[DDT.resourceRecord_S],
-                       additional_records: list[DDT.resourceRecord_S],
+                       answer_records: list[DDT.a_rr_S],
+                       authority_records: list[DDT.a_rr_S],
+                       additional_records: list[DDT.a_rr_S],
                        rcode=0):
         builder = BO.byteBuilder_C()
 
