@@ -104,6 +104,9 @@ class dns_request_S:
     authority: list[a_rr_S] = []
     additional: list[a_rr_S] = []
 
+    is_malformed = False
+    malformed_reason = ''
+
 class dns_response_S:
     """ a full response """
     pass

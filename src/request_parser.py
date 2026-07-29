@@ -13,12 +13,64 @@ from src.helpers.flagOpt import dnsFlag_C as FO
 import dataStructures.dns_dataTypes as DDT
 
 
-myL.logger_C('', debug=Gcfg.LOGGER_DEBUG)
+log = myL.logger_C('', debug=Gcfg.LOGGER_DEBUG)
 
-class malformedDNSPacket_E(Exception):
-    """ malformed packet handle  """
-    pass
+class malformedPkg_E(Exception):
+    """DNS packet format is malformed."""
 
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(reason)
+
+    @staticmethod
+    def reserved_label_form():
+        return malformedPkg_E('reserved DNS label form 01/10')
+
+    @staticmethod
+    def pointer_loop():
+        return malformedPkg_E('DNS name pointer loop')
+
+    @staticmethod
+    def too_many_pointer_jumps():
+        return malformedPkg_E('too many DNS name pointer jumps')
+
+    @staticmethod
+    def label_too_long():
+        return malformedPkg_E('DNS label length > 63')
+
+    @staticmethod
+    def name_too_long():
+        return malformedPkg_E('DNS full name length > 255')
+
+    @staticmethod
+    def packet_boundary():
+        return malformedPkg_E('read out of DNS packet boundary')
+
+    @staticmethod
+    def rdlength_out_of_range():
+        return malformedPkg_E('RDLENGTH out of packet boundary')
+
+    @staticmethod
+    def set_error_request(request: DDT.dns_request_S, e):
+        request.is_malformed = True
+        request.malformed_reason = e.reason
+
+        tmp_request = DDT.dns_request_S()
+        tmp_request.header.id = request.header.id # keep original id
+
+        # header - flags
+        request.header.flag_readable.RCODE = DDT.flag_respondCode_ENUM.FORMERR
+        request.header.flags = FO.encode(request.header.flag_readable)
+
+        # question and resources
+        request.answers = []
+        request.authority = []
+        request.additional = []
+
+        return tmp_request
+
+
+    
 
 class dnsParser_C:
 
@@ -32,38 +84,42 @@ class dnsParser_C:
             !! only parse once !! 
             Destroy it when finfish
         """
+
+        self.data = b''
         # feeded data or reading file
         if data is not None:
             self.data = data
-        else:
-            self.data = b''
+        elif filename is not None:
             with open(filename, 'rb') as file:
                 self.data = file.read()
+        else:
+            raise ValueError("filename or data is expected")
 
         self.pointer = 0 # parser manage byte pointer
         
         self.bo = BO.byteReader_C(self.data)
-        self.request = DDT.dns_request_S()
 
+        self.request = DDT.dns_request_S()
+        self.request.is_malformed = False
+        self.request.malformed_reason = ''
+    
+
+    def _check_pos(self, pos: int):
+        if pos < 0 or pos >= len(self.data):
+            raise malformedPkg_E.packet_boundary()
+
+    def _check_range(self, pos: int, length: int):
+        if pos < 0 or pos + length > len(self.data):
+            raise malformedPkg_E.packet_boundary()
 
 
     def _decode_name(self, start_pos=None) -> tuple[str, int]:
         """
-            decode DNS name
+        decode DNS name
 
-            @input:
-                start_pos: pointer start position
-
-            @return:
-                name: ...
-                next_pos: pointer next position
-                
-            
-            2. avoid pointer loop
-            3. limit pointer jump <= 20
-            4. reject 01 / 10 reserved label forms
-            5. check label length <= 63
-            6. check full name length <= 255
+        @return:
+            name: ...
+            next_pos: position after the encoded name in the original path
         """
 
         if start_pos is None:
@@ -71,50 +127,78 @@ class dnsParser_C:
         else:
             tmp_pos = start_pos
 
-        # limitation
-        pointerJump_counter = 0
-        visited_offsets = set() # log jumper visited 
         labels = []
+        visited_offsets = set() # log visited offsets
+        pointerJump_counter = 0
+        jumped = False
+        next_pos = tmp_pos
 
         while True:
+            self._check_pos(tmp_pos)
+
             length = self.data[tmp_pos]
-            tmp_pos = tmp_pos + 1 # move out from the length byte
+            tmp_pos = tmp_pos + 1
 
             # end of name 00
             if length == 0:
+                if not jumped:
+                    next_pos = tmp_pos
                 break
 
-            # handle compression pointer C0 xx
-            if length & 0xC0 == 0xC0: # hit compression pointer
-                pointer_jumpTo = ((length & 0x3F) << 8) | self.data[tmp_pos] # offset calcu
-                tmp_pos += 1 # skip 0x0C
-                pointed_name, _ = self._decode_name(pointer_jumpTo)
-                if pointed_name != '.':
-                    labels.extend(pointed_name[:-1].split('.')) # remove the last .
-                break
+            # compression pointer 11
+            if length & 0xC0 == 0xC0:
+                self._check_pos(tmp_pos)
 
-            # handle 01 10
+                second_byte = self.data[tmp_pos]
+                tmp_pos = tmp_pos + 1
+
+                pointer_jumpTo = ((length & 0x3F) << 8) | second_byte
+
+                # avoid pointer loop
+                if pointer_jumpTo in visited_offsets:
+                    raise malformedPkg_E.pointer_loop()
+                visited_offsets.add(pointer_jumpTo)
+
+                # count jump times
+                pointerJump_counter = pointerJump_counter + 1
+                if pointerJump_counter > Gcfg.MAXIMUM_POINTER_JUMP:
+                    raise malformedPkg_E.too_many_pointer_jumps()
+
+                if not jumped:
+                    next_pos = tmp_pos
+
+                jumped = True
+                tmp_pos = pointer_jumpTo
+                continue
+
+            # label forms start with 01 or 10
             if length & 0xC0 != 0:
-                raise ValueError('reserved DNS label form')
-            
-            # normal label
-            label_bytes = self.bo.data[tmp_pos:tmp_pos+length]
-            label = label_bytes.decode(errors='replace') # decode as ASCII
+                raise malformedPkg_E.reserved_label_form()
+
+            # normal label length check
+            if length > Gcfg.MAXIMUM_LABEL_LENGTH:
+                raise malformedPkg_E.label_too_long()
+
+            self._check_range(tmp_pos, length)
+
+            label_bytes = self.data[tmp_pos:tmp_pos + length]
+            label = label_bytes.decode(errors='replace')
             labels.append(label)
 
-            # shift pos to next label
             tmp_pos = tmp_pos + length
 
-        # root
         if len(labels) == 0:
             name = '.'
-        else: # non root
+        else:
             name = '.'.join(labels) + '.'
 
-        if start_pos is None:
-            self.pointer = tmp_pos
+        if len(name) > Gcfg.MAXIMUM_LABEL_LENGTH:
+            raise malformedPkg_E.name_too_long()
 
-        return name, tmp_pos
+        if start_pos is None:
+            self.pointer = next_pos
+
+        return name, next_pos
 
 
     def _parse_header(self):
@@ -162,8 +246,8 @@ class dnsParser_C:
             return rdata
 
         # NS / CNAME / PTR
-        if rr_type in (DDT.dnsType_ENUM.NS, 
-                       DDT.dnsType_ENUM.CNAME, 
+        if rr_type in (DDT.dnsType_ENUM.NS,
+                       DDT.dnsType_ENUM.CNAME,
                        DDT.dnsType_ENUM.PTR) and rdlength > 0:
             name, next_pos = self._decode_name(rdata_start)
             if next_pos <= rdata_start + rdlength:
@@ -201,6 +285,10 @@ class dnsParser_C:
         # decode record data
         rdata_start = self.pointer
         rdata_end = rdata_start + tmp_rr.rdlength
+
+        if rdata_end > len(self.data):
+            raise malformedPkg_E.rdlength_out_of_range()
+
         self.pointer = rdata_end
 
         tmp_rr.rdata = self._parse_recordData(tmp_rr.type,
@@ -213,29 +301,42 @@ class dnsParser_C:
 
 
     def parse(self) -> DDT.dns_request_S:
-        """ parse full DNS message """
+        """
+        Parse full DNS message.
 
-        # header
-        self._parse_header()
+        This method catches malformedDNSPacket_E and still returns request.
+        Caller can check:
+            request.is_malformed
+            request.malformed_reason
+        """
 
-        # questions
-        for _ in range(self.request.header.qdCount):
-            question = self._parse_question()
-            self.request.questions.append(question)
+        try:
+            # header
+            self._parse_header()
 
-        # answers
-        for _ in range(self.request.header.anCount):
-            rr = self._parse_resourceRecord()
-            self.request.answers.append(rr)
+            # questions
+            for _ in range(self.request.header.qdCount):
+                question = self._parse_question()
+                self.request.questions.append(question)
 
-        # authority
-        for _ in range(self.request.header.nsCount):
-            rr = self._parse_resourceRecord()
-            self.request.authority.append(rr)
+            # answers
+            for _ in range(self.request.header.anCount):
+                rr = self._parse_resourceRecord()
+                self.request.answers.append(rr)
 
-        # additional
-        for _ in range(self.request.header.arCount):
-            rr = self._parse_resourceRecord()
-            self.request.additional.append(rr)
+            # authority
+            for _ in range(self.request.header.nsCount):
+                rr = self._parse_resourceRecord()
+                self.request.authority.append(rr)
+
+            # additional
+            for _ in range(self.request.header.arCount):
+                rr = self._parse_resourceRecord()
+                self.request.additional.append(rr)
+
+        except malformedPkg_E as e:
+            log.warn(e.reason)
+            malformedPkg_E.set_error_request(self.request, e)
+
 
         return self.request
