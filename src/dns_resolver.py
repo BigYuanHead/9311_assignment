@@ -90,7 +90,6 @@ class resolver_C:
 
                 # 4. Cache positive answer
                 if result.rcode == DDT.flag_respondCode_ENUM.NOERROR and len(result.answers) > 0:
-                    self.cache.put_answer_records(result.answers)
                     self.cache.put_chain(question, result.answers)
                     log.success('answer cached')
 
