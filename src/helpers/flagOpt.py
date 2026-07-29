@@ -55,7 +55,7 @@ class dnsFlag_C:
     @staticmethod
     def make_clientResponse_flags(query_flags: int, rcode: int = 0):
         """
-            for response sent back to client
+            respond client using
 
             Keep:
             - Opcode from client query
@@ -87,6 +87,8 @@ class dnsFlag_C:
     @staticmethod
     def is_upstreamResponse_valid(flags: int):
         """
+            upstream respond using
+            
             expect:
                 QR = 1
                 Opcode = 0
@@ -97,10 +99,8 @@ class dnsFlag_C:
 
         if parsed.QR != 1:
             return False
-
         if parsed.Opcode != 0:
             return False
-
         if parsed.TC != 0:
             return False
 

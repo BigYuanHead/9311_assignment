@@ -43,3 +43,18 @@ _resolve_question(question, shared_context)
           ├── find_answer_path()
           ├── is_authoritative_nodata()
           └── find_referral()
+
+
+# response_analyser
+```
+iterative_resolver
+    ↓ RCODE = NOERROR
+response_analyser.find_answer_path()
+    ├─ final answer
+    ├─ CNAME，需要继续查询
+    └─ 没有 Answer
+          ↓
+response_analyser.is_authoritative_nodata()
+          ↓ 如果不是
+response_analyser.find_referral()
+```

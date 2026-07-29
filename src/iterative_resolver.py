@@ -70,12 +70,12 @@ class iterativeResolver_C:
             DDT.flag_respondCode_ENUM.SERVFAIL
         )
 
-    def _get_rootServer_ips(self) -> list[str]:
+    def _get_rootServer_IPs(self) -> list[str]:
         result: list[str] = []
-        root_ns_records: list[DDT.a_rr_S] = self.root_hints.get_rootNS_records()
+        root_ns_records = self.root_hints.get_rootNS_records()
 
         for ns_record in root_ns_records:
-            a_records: list[DDT.a_rr_S] = self.root_hints.get_records_with_name(
+            a_records = self.root_hints.get_records_with_name(
                 ns_record.rdata
             )
 
@@ -84,7 +84,7 @@ class iterativeResolver_C:
 
         return result
 
-    def _make_question(self,
+    def _build_dnsQuestion(self,
                        name: str,
                        rr_type: int,
                        rr_class: int) -> DDT.a_question_S:
@@ -94,7 +94,7 @@ class iterativeResolver_C:
             qclass=rr_class
         )
 
-    def _build_final_answers(self,
+    def _build_finalAnswers(self,
                              cname_chain: list[DDT.a_rr_S],
                              final_records: list[DDT.a_rr_S]
                              ) -> list[DDT.a_rr_S]:
@@ -133,7 +133,7 @@ class iterativeResolver_C:
         return True
 
     # =========== nested NS lookup ===========
-    def _resolve_nameServer_ips(self,
+    def _resolve_nameServer_IPs(self,
                                 ns_names: list[str],
                                 rr_class: int,
                                 context: resolveContext_DC
@@ -146,7 +146,7 @@ class iterativeResolver_C:
 
             log.info('no glue, lookup {}'.format(ns_name))
 
-            ns_question = self._make_question(
+            ns_question = self._build_dnsQuestion(
                 ns_name,
                 DDT.dnsType_ENUM.A,
                 rr_class
@@ -179,12 +179,12 @@ class iterativeResolver_C:
         """ one logical lookup """
 
         # 1. start from root
-        current_question: DDT.a_question_S = question
-        candidateServer_IPs: list[str] = self._get_rootServer_ips()
+        current_question = question
+        candidateServer_IPs = self._get_rootServer_IPs()
 
         cname_chain: list[DDT.a_rr_S] = []
         visited_names: set[str] = {
-            self._norm_name(question.qname)
+            self._norm_name(question.qname) # avoid loop back
         }
 
         while True:
@@ -203,10 +203,10 @@ class iterativeResolver_C:
                 log.debug('no candidate server IPs')
                 return self._servfail()
 
-            moved_to_next_step = False
 
-            # candidate NS IP -> check answer or next level
-            for server_ip in candidateServer_IPs:
+            # 2. candidate NS IPs -> 
+            #       find someone can answer next level rr
+            for a_IP in candidateServer_IPs:
 
                 # limit
                 if not self._can_attempt(context):
@@ -214,45 +214,48 @@ class iterativeResolver_C:
                 context.attempt_counter = context.attempt_counter + 1
 
                 log.debug('ask {} for {} type {}'.format(
-                    server_ip,
+                    a_IP,
                     current_question.qname,
                     DDT.dnsType_ENUM.mapper[current_question.qtype]
                 ))
 
+                # timeout
                 remaining_time = self._remaining_time(context)
-
                 if remaining_time <= 0:
                     return self._servfail()
 
-                query_timeout = min(
-                    self.timeout,
-                    remaining_time
-                )
-
+                # 3. ask upstream once
+                query_timeout = min(self.timeout, remaining_time)
                 response = self.upstream_client.ask(
-                    server_ip,
+                    a_IP,
                     current_question,
                     query_timeout
                 )
 
+                # respond not vaild
                 if response is None:
-                    log.debug('no usable response from {}'.format(server_ip))
+                    log.debug('no usable response from {}'.format(a_IP))
                     continue
 
+                # ******** respond vaild ********
                 rcode = FO.get_rcode(response.header.flags)
                 log.debug('response from {}, rcode={}, answer={}, authority={}, additional={}'.format(
-                    server_ip,
+                    a_IP,
                     rcode,
                     len(response.answers),
                     len(response.authority),
                     len(response.additional)
                 ))
 
-                # terminal NXDOMAIN for this logical lookup
+                ## terminal NXDOMAIN for this logical lookup
                 if rcode == DDT.flag_respondCode_ENUM.NXDOMAIN:
-                    log.info('NXDOMAIN for {}'.format(
-                        current_question.qname
-                    ))
+                    # NOT AA
+                    if FO.is_authoritative(response.header.flags) is False:
+                        log.debug('ignore non-authoritative NXDOMAIN')
+                        continue
+                    # IS AA
+                    log.info('NXDOMAIN for {}'.format(current_question.qname))
+                    # END - AA no rr
                     return DDT.resolutionResult_S(
                         cname_chain,
                         [],
@@ -260,14 +263,15 @@ class iterativeResolver_C:
                         DDT.flag_respondCode_ENUM.NXDOMAIN
                     )
 
+                ## ERROR
                 if rcode != DDT.flag_respondCode_ENUM.NOERROR:
                     log.debug('skip server {}, rcode={}'.format(
-                        server_ip,
+                        a_IP,
                         rcode
                     ))
                     continue
 
-                # final answer or CNAME path
+                # >>>>>>>>>>>>>>>>> final answer or CNAME path >>>>>>>>>>>>>>>>>
                 answer_path = self.response_analyser.find_answer_path(
                     response,
                     current_question,
@@ -281,8 +285,9 @@ class iterativeResolver_C:
                     ))
                     continue
 
+                ## $$$$$$$$ [ - END - ] Get Final answer $$$$$$$$
                 if answer_path.is_final:
-                    final_answers = self._build_final_answers(
+                    final_answers = self._build_finalAnswers(
                         cname_chain,
                         answer_path.records
                     )
@@ -300,6 +305,7 @@ class iterativeResolver_C:
                         DDT.flag_respondCode_ENUM.NOERROR
                     )
 
+                ## no final answer, BUT CNAME !!
                 if answer_path.next_name is not None:
                     for record in answer_path.records:
                         cname_chain.append(record)
@@ -311,16 +317,17 @@ class iterativeResolver_C:
                         answer_path.next_name
                     ))
 
-                    current_question = self._make_question(
+                    ### redirect to NEW entry -> the end of CNAME chain
+                    current_question = self._build_dnsQuestion(
                         answer_path.next_name,
                         current_question.qtype,
                         current_question.qclass
                     )
-                    candidateServer_IPs = self._get_rootServer_ips()
-                    moved_to_next_step = True
-                    break
+                    candidateServer_IPs = self._get_rootServer_IPs()
+                    break # @@@@@@ Break FOR Loop @@@@@@
 
-                # authoritative NODATA
+                # >>>>>>>>>>>>>>>>> AA NODATA >>>>>>>>>>>>>>>>>
+                ## $$$$$$$$ [ - END - ] Reach AA but no Final answer $$$$$$$$
                 if self.response_analyser.is_authoritative_nodata(
                     response,
                     current_question
@@ -335,33 +342,37 @@ class iterativeResolver_C:
                         DDT.flag_respondCode_ENUM.NOERROR
                     )
 
-                # referral
+                ## >>>>>>>>>>>>>>>>> referral >>>>>>>>>>>>>>>>>
                 referral = self.response_analyser.find_referral(response)
 
                 if referral is None:
-                    log.debug('no useful data from {}'.format(server_ip))
+                    log.debug('no useful data from {}'.format(a_IP))
                     continue
 
                 # following one referral uses referral budget
                 if not self._consume_referral(context):
                     return self._servfail()
 
-                if len(referral.glue_ips) > 0:
+                # A. referral contain IPs
+                if len(referral.glue_ips) > 0: 
                     log.info('referral with glue, move to next servers')
                     log.debug('glue servers: \n{}'.format(
                         referral.glue_ips
                     ))
 
+                    # use those IPs and enter next level
                     candidateServer_IPs = referral.glue_ips
-                    moved_to_next_step = True
-                    break
+                    break # @@@@@@ Break FOR Loop @@@@@@
+                
 
-                nextCandidateServer_IPs: list[str] = self._resolve_nameServer_ips(
+                ### B. referral does NOT have IPs
+                nextCandidateServer_IPs = self._resolve_nameServer_IPs(
                     referral.ns_names,
                     current_question.qclass,
                     context
                 )
 
+                ##### Got IPs for referral NS
                 if len(nextCandidateServer_IPs) > 0:
                     log.info('NS-name lookup success, move to next servers')
                     log.debug('next candidate server IPs: \n{}'.format(
@@ -369,29 +380,28 @@ class iterativeResolver_C:
                     ))
 
                     candidateServer_IPs = nextCandidateServer_IPs
-                    moved_to_next_step = True
-                    break
+                    break # @@@@@@ Break FOR Loop @@@@@@
 
                 # unusable referral, try next candidate at current level
                 log.debug('referral has no usable server address')
+            else:
+                log.warn('all candidate servers failed')
+                return self._servfail()
 
-            if moved_to_next_step:
-                continue
 
-            log.warn('all candidate servers failed')
-            return self._servfail()
+
 
     def resolve(self,
                 question: DDT.a_question_S
                 ) -> DDT.resolutionResult_S:
-        """main iterative resolver entrance"""
+        """ !!! main iterative resolver entrance !!! """
 
         log.info('start resolve {} type {}'.format(
             question.qname,
             question.qtype
         ))
 
-        # set up all limitations
+        # init limitations
         context = resolveContext_DC(
             attempt_counter=0,
             referral_counter=0,

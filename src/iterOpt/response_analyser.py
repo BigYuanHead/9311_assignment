@@ -1,7 +1,6 @@
 """analyse one validated upstream DNS response"""
 
 
-
 from dataclasses import dataclass
 
 from src.helpers.flagOpt import dnsFlag_C as FO
@@ -28,6 +27,7 @@ class answerPath_DC:
 
 
 class responseAnalyser_C:
+    """ follow CNAME, nests """
 
     def __init__(self, max_cname_depth: int):
         self.max_cname_depth = max_cname_depth
@@ -38,28 +38,47 @@ class responseAnalyser_C:
     def _get_records(self,
                      records: list[DDT.a_rr_S],
                      name: str,
-                     rr_type: int) -> list[DDT.a_rr_S]:
-        result: list[DDT.a_rr_S] = []
+                     rr_type: int
+                     ) -> list[DDT.a_rr_S]:
+        """ 
+            rr name == expected name 
+            rr type == expected type
+            GOT GOT GOT
+        """
+
+        results: list[DDT.a_rr_S] = [] # may have multiple rr
         check_name = self._norm_name(name)
 
         for record in records:
             if self._norm_name(record.name) == check_name:
                 if record.rr_type == rr_type:
-                    result.append(record)
+                    results.append(record)
 
-        return result
+        return results
 
     def find_answer_path(self,
                          response: DDT.dns_request_S,
                          question: DDT.a_question_S,
-                         cname_count: int,
+                         cnameChain_len: int,
                          visited_names: set[str]
                          ) -> answerPath_DC:
+        """
+            A finder + CNAME chaser
+
+            @input:
+                - response: from upstream
+                - question: original logical question
+                - cnameChain_len: CNAME current chain length
+                - visited_names: CANME chain
+        """
+        
         records: list[DDT.a_rr_S] = []
         current_name = question.qname
         check_visited = set(visited_names)
 
         while True:
+
+            # ------------ 1. search final answer ------------
             answers = self._get_records(
                 response.answers,
                 current_name,
@@ -78,40 +97,42 @@ class responseAnalyser_C:
                     visited_names=check_visited
                 )
 
-            # direct CNAME query should not chase target
-            if question.qtype == DDT.dnsType_ENUM.CNAME:
-                return answerPath_DC(
-                    records=[],
-                    next_name=None,
-                    is_final=False,
-                    invalid_reason=None,
-                    visited_names=check_visited
-                )
-
+            # ------------ 2. CNAME ------------
+            ## direct question NOT CNAME, e.g.
+            ## Q: alias.example. A ----- A: alias.example. CNAME target.example.
             cname_records = self._get_records(
                 response.answers,
                 current_name,
                 DDT.dnsType_ENUM.CNAME
             )
 
+            '''
+                curretn question name, 
+                NO expected qtype FOUND, and NO CNAME ANYMORE
+                e.g.
+                    a.example. CNAME b.example. 
+                    b.example. CNAME c.example. <- STOP here 
+            '''
             if len(cname_records) == 0:
                 next_name = None
-                if len(records) > 0:
+                if len(records) > 0: # used to move toward CNAME chain
                     next_name = current_name
 
                 return answerPath_DC(
                     records=records,
-                    next_name=next_name,
+                    next_name=next_name, # resolver will dig the final one
                     is_final=False,
                     invalid_reason=None,
                     visited_names=check_visited
                 )
 
+            ### !! have CNAME !!
             cname_record = cname_records[0]
             target_name = cname_record.rdata
             norm_target = self._norm_name(target_name)
 
-            if cname_count + len(records) >= self.max_cname_depth:
+            # check: cname chain depth + loop
+            if cnameChain_len + len(records) >= self.max_cname_depth:
                 return answerPath_DC(
                     records=[],
                     next_name=None,
@@ -119,7 +140,6 @@ class responseAnalyser_C:
                     invalid_reason='reach max CNAME depth',
                     visited_names=visited_names
                 )
-
             if norm_target in check_visited:
                 return answerPath_DC(
                     records=[],
@@ -129,14 +149,18 @@ class responseAnalyser_C:
                     visited_names=visited_names
                 )
 
+            # follow the chain
             records.append(cname_record)
             check_visited.add(norm_target)
             current_name = target_name
+
 
     def is_authoritative_nodata(self,
                                 response: DDT.dns_request_S,
                                 question: DDT.a_question_S
                                 ) -> bool:
+        """ AA NS exist, BUT it does NOT have request qtype """
+        
         flags = FO.decode(response.header.flags)
 
         if flags.RCODE != DDT.flag_respondCode_ENUM.NOERROR:
@@ -166,18 +190,21 @@ class responseAnalyser_C:
 
         return True
 
+
     def find_referral(
-        self,
-        response: DDT.dns_request_S
-    ) -> referralResult_DC | None:
+            self,
+            response: DDT.dns_request_S
+            ) -> referralResult_DC | None:
+        """ chase referral """
+
         flags = FO.decode(response.header.flags)
 
-        # authoritative NS records are not referral
+        # authoritative NS records dont have referral
         if flags.AA == 1:
             return None
 
+        ## >>>>>>>>>>>>>>>>> log next level NS AA server >>>>>>>>>>>>>>>>>
         ns_names: list[str] = []
-
         for record in response.authority:
             if record.rr_type == DDT.dnsType_ENUM.NS:
                 ns_names.append(record.rdata)
@@ -185,8 +212,9 @@ class responseAnalyser_C:
         if len(ns_names) == 0:
             return None
 
-        glue_ips: list[str] = []
 
+        ## >>>>>>>>>>>>>>>>> log next level NS AA server IP >>>>>>>>>>>>>>>>>
+        glue_ips: list[str] = []
         # NS wire order first, then matching Additional A wire order
         for ns_name in ns_names:
             for record in response.additional:
