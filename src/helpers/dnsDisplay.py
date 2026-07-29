@@ -6,6 +6,20 @@ class dnsDisplay_C:
     def __init__(self, request: DDT.dns_request_S):
         self.request = request
 
+    def _print_malformed(self):
+        print('--- MALFORMED DNS PACKET ---')
+
+        if hasattr(self.request, 'malformed_reason'):
+            print('Reason: {}'.format(self.request.malformed_reason))
+        else:
+            print('Reason: unknown')
+
+        if hasattr(self.request, 'header'):
+            print('ID: {}'.format(self.request.header.id))
+
+        print()
+
+
     def _type_name(self, t: int):
         """ incase unknow type name happened """
         if t in DDT.dnsType_ENUM.mapper:
@@ -71,6 +85,12 @@ class dnsDisplay_C:
         print()
 
     def display(self):
+
+        # handle malformed
+        if self.request.is_malformed is True:
+            self._print_malformed()
+            return
+
         self._print_flags()
         self._print_counts()
         self._print_questions()

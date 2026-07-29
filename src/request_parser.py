@@ -55,19 +55,15 @@ class malformedPkg_E(Exception):
         request.is_malformed = True
         request.malformed_reason = e.reason
 
-        tmp_request = DDT.dns_request_S()
-        tmp_request.header.id = request.header.id # keep original id
-
         # header - flags
-        request.header.flag_readable.RCODE = DDT.flag_respondCode_ENUM.FORMERR
-        request.header.flags = FO.encode(request.header.flag_readable)
+        # if request.header.flag_readable is not None:
+        #     request.header.flag_readable.RCODE = DDT.flag_respondCode_ENUM.FORMERR
+        #     request.header.flags = FO.encode(request.header.flag_readable)
 
         # question and resources
         request.answers = []
         request.authority = []
         request.additional = []
-
-        return tmp_request
 
 
     
@@ -192,7 +188,7 @@ class dnsParser_C:
         else:
             name = '.'.join(labels) + '.'
 
-        if len(name) > Gcfg.MAXIMUM_LABEL_LENGTH:
+        if len(name) > Gcfg.FULL_NAME_LENGTH:
             raise malformedPkg_E.name_too_long()
 
         if start_pos is None:
@@ -281,6 +277,7 @@ class dnsParser_C:
         tmp_rr.rr_class, _np = self.bo.read_u16(_np) # CLASS
         tmp_rr.ttl, _np = self.bo.read_u32(_np) # TTL
         tmp_rr.rdlength, _np = self.bo.read_u16(_np) # RDLENGTH
+        self.pointer = _np # update
 
         # decode record data
         rdata_start = self.pointer

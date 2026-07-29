@@ -98,7 +98,7 @@ class a_rr_S:
 class dns_request_S:
     """ a full request """
 
-    header: header_S
+    header: header_S = header_S()
     questions: list[a_question_S] = []
     answers: list[a_rr_S] = []
     authority: list[a_rr_S] = []
