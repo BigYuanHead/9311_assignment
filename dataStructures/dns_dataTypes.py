@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 
@@ -65,6 +65,7 @@ class flag_S:
     RCODE: int = 0      # response code
 
 
+@dataclass
 class header_S:
     id: int = 0         # ID
     flags: int = 0      # FLAGS
@@ -73,7 +74,7 @@ class header_S:
     nsCount: int = 0    # NSCOUNT
     arCount: int = 0    # ARCOUNT
 
-    flag_readable: flag_S
+    flag_readable: flag_S = field(default_factory=flag_S)
 
 
 # ----------------- DNS question and resource record -----------------
@@ -88,39 +89,34 @@ class a_question_S:
 class a_rr_S:
     """ rr - resource record """
     name: str = ''
-    type: int = 0
+    rr_type: int = 0
     rr_class: int = dnsClass_ENUM.IN
     ttl: int = 0
     rdlength: int = 0   # record data length
     rdata: str = ''      # record data
 
 
+@dataclass
 class dns_request_S:
     """ a full request """
 
-    header: header_S = header_S()
-    questions: list[a_question_S] = []
-    answers: list[a_rr_S] = []
-    authority: list[a_rr_S] = []
-    additional: list[a_rr_S] = []
+    header: header_S = field(default_factory=header_S)
+    questions: list[a_question_S] = field(default_factory=list)
+    answers: list[a_rr_S] = field(default_factory=list)
+    authority: list[a_rr_S] = field(default_factory=list)
+    additional: list[a_rr_S] = field(default_factory=list)
 
-    is_malformed = False
-    malformed_reason = ''
+    is_malformed: bool = False
+    malformed_reason: str = ''
 
-class dns_response_S:
-    """ a full response """
-    pass
 
-# ----------------- root record -----------------
 @dataclass
-class rootRecord_S:
-    name: str
-    ttl: int
-    rr_class: int
-    rr_type: int
-    rdata: str
-
-
+class resolutionResult_S:
+    """ result returned by one resolver source """
+    answers: list[a_rr_S]
+    authority: list[a_rr_S]
+    additional: list[a_rr_S]
+    rcode: int
 
 
 

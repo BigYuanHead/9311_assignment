@@ -63,6 +63,7 @@ class dnsFlag_C:
 
             Set:
             - QR = 1
+            - RA = 1
             - RCODE = given rcode
         """
 
@@ -74,7 +75,7 @@ class dnsFlag_C:
             AA = 0,
             TC = 0,
             RD = query.RD,
-            RA = 0,
+            RA = 1,
             Z = 0,
             AD = 0,
             CD = 0,

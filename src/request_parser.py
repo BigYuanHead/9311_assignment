@@ -298,7 +298,7 @@ class dnsParser_C:
 
         tmp_rr.name, _np = self._decode_name() # NAME
 
-        tmp_rr.type, _np = self.bo.read_u16(_np) # TYPE
+        tmp_rr.rr_type, _np = self.bo.read_u16(_np) # TYPE
         tmp_rr.rr_class, _np = self.bo.read_u16(_np) # CLASS
         tmp_rr.ttl, _np = self.bo.read_u32(_np) # TTL
         tmp_rr.rdlength, _np = self.bo.read_u16(_np) # RDLENGTH
@@ -313,13 +313,13 @@ class dnsParser_C:
 
         self.pointer = rdata_end
 
-        tmp_rr.rdata = self._parse_recordData(tmp_rr.type,
+        tmp_rr.rdata = self._parse_recordData(tmp_rr.rr_type,
                                        tmp_rr.rdlength,
                                        rdata_start)
         
         log.debug(f"RR parsed: \
                   name={tmp_rr.name}, \
-                    type={tmp_rr.type}, \
+                    type={tmp_rr.rr_type}, \
                         class={tmp_rr.rr_class}, \
                             ttl={tmp_rr.ttl}, \
                                 rdlength={tmp_rr.rdlength}, \

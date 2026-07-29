@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 import src.helpers.myLogger as myL
 import dataStructures.dns_dataTypes as DDT
-import src.request_parser as RP
 
 
 log = myL.logger_C('NESTED', debug=True)
@@ -48,28 +47,30 @@ class nestedLookupHandler_C:
             qclass=qclass
         )
 
-    def _get_ns_names(self, parser: RP.dnsParser_C):
+    def _get_ns_names(self, response: DDT.dns_request_S):
         result = []
 
-        for record in parser.authority:
+        for record in response.authority:
             if record.rr_type == DDT.dnsType_ENUM.NS:
                 result.append(record.rdata)
 
         return result
 
-    def _get_glue_ips(self, parser: RP.dnsParser_C, ns_names: list):
+    def _get_glue_ips(self,
+                      response: DDT.dns_request_S,
+                      ns_names: list):
         result = []
 
         for ns_name in ns_names:
-            for record in parser.additional:
+            for record in response.additional:
                 if record.rr_type == DDT.dnsType_ENUM.A:
                     if self._norm_name(record.name) == self._norm_name(ns_name):
                         result.append(record.rdata)
 
         return result
 
-    def analyse(self, parser: RP.dnsParser_C):
-        ns_names = self._get_ns_names(parser)
+    def analyse(self, response: DDT.dns_request_S):
+        ns_names = self._get_ns_names(response)
 
         if len(ns_names) == 0:
             log.debug('no NS records in authority')
@@ -79,7 +80,7 @@ class nestedLookupHandler_C:
                 glue_ips=[]
             )
 
-        glue_ips = self._get_glue_ips(parser, ns_names)
+        glue_ips = self._get_glue_ips(response, ns_names)
 
         log.debug('ns names: \n{}'.format(ns_names))
         log.debug('glue ips: \n{}'.format(glue_ips))

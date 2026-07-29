@@ -43,37 +43,6 @@ class resolver_C:
 
 
 
-    def _norm_name(self, name):
-        return name.lower()
-
-    def _find_rootHints_records(self, question: DDT.a_question_S):
-        """return answers, authority, additional for local answers"""
-
-        answers = []
-        authority = []
-        additional = []
-
-        qname = self._norm_name(question.qname)
-
-        # QNAME ., QTYPE NS
-        if qname == '.' and question.qtype == DDT.dnsType_ENUM.NS:
-            answers = self.root_hints.get_rootNS_records()
-
-            for ns_record in answers:
-                a_records = self.root_hints.get_records_with_name(ns_record.rdata)
-                for a_record in a_records:
-                    additional.append(a_record)
-
-            return answers, authority, additional
-
-        # QNAME root-server-name, QTYPE A
-        if question.qtype == DDT.dnsType_ENUM.A:
-            answers = self.root_hints.get_records_with_name(question.qname)
-            return answers, authority, additional
-
-        return answers, authority, additional
-
-
     def _handle_query(self, query_data: bytes):
         """
             inbounce query will be processed in here
@@ -81,53 +50,52 @@ class resolver_C:
 
         # parse a query
         parser = RP.dnsParser_C(filename=None, data=query_data)
-        parser.parse()
+        request = parser.parse()
 
         # if query question empty, return SERVFAIL
-        if len(parser.questions) == 0:
-            return self.response_builder.build_response(parser, [], [], [], rcode=2)
+        if len(request.questions) == 0:
+            return self.response_builder.build_response(
+                request,
+                [],
+                [],
+                [],
+                rcode=DDT.flag_respondCode_ENUM.SERVFAIL
+            )
 
-        question = parser.questions[0]
+        question = request.questions[0]
 
         # 1. if root require -> find in local root hints file
-        answers, authority, additional = self._find_rootHints_records(question)
+        result = self.root_hints.find_local_result(question)
 
-        if len(answers) > 0:
+        if result is not None:
             log.success('answer from root hints')
-            return self.response_builder.build_response(
-                parser,
-                answers,authority,
-                additional,
-                rcode=0
-            )
-        
 
-        # 2. if Cache?
-        cached_answers = self.cache.get_chain(question)
-        if cached_answers is not None:
-            log.success('cache hit full chain')
-            return self.response_builder.build_response(
-                parser,
-                cached_answers,
-                [],
-                [],
-                rcode=0
-            )
+        else:
+            # 2. if Cache?
+            cached_answers = self.cache.get_chain(question)
+            if cached_answers is not None:
+                log.success('cache hit full chain')
+                result = DDT.resolutionResult_S(
+                    cached_answers,
+                    [],
+                    [],
+                    DDT.flag_respondCode_ENUM.NOERROR
+                )
 
-        # 3. Iterative resolver
-        log.info('NO cache, start iterative resolution')
+            else:
+                # 3. Iterative resolver
+                log.info('NO cache, start iterative resolution')
+                result = self.iterative_resolver.resolve(question)
 
-        result = self.iterative_resolver.resolve(question)
+                # 4. Cache positive answer
+                if result.rcode == DDT.flag_respondCode_ENUM.NOERROR and len(result.answers) > 0:
+                    self.cache.put_answer_records(result.answers)
+                    self.cache.put_chain(question, result.answers)
+                    log.success('answer cached')
 
-        # 4. Cache positive answer
-        if result.rcode == 0 and len(result.answers) > 0:
-            self.cache.put_answer_records(result.answers)
-            self.cache.put_chain(question, result.answers)
-            log.success('answer cached')
-
-        # 5. fresh response
+        # 5. build response
         return self.response_builder.build_response(
-            parser,
+            request,
             result.answers,
             result.authority,
             result.additional,
@@ -150,6 +118,3 @@ class resolver_C:
                 # continue
 
             self.sock.sendto(response_data, client_address)
-
-
-

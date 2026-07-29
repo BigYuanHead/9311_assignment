@@ -1,12 +1,6 @@
-import src.helpers.myLogger as myL
-
 import dataStructures.dns_dataTypes as DDT
 import src.helpers.bytesOpt as BO
 from src.helpers.flagOpt import dnsFlag_C as FO
-
-import src.request_parser as RP
-import src.rootHints_parser as RhP
-import src.request_parser as RP
 
 
 
@@ -107,23 +101,23 @@ class dnsResponseBuilder_C:
         return builder.get_bytes()
 
     def build_response(self, 
-                       parser: RP.dnsParser_C,
+                       request: DDT.dns_request_S,
                        answer_records: list[DDT.a_rr_S],
                        authority_records: list[DDT.a_rr_S],
                        additional_records: list[DDT.a_rr_S],
                        rcode=0):
         builder = BO.byteBuilder_C()
 
-        flags = FO.make_clientResponse_flags(parser.flags, rcode)
+        flags = FO.make_clientResponse_flags(request.header.flags, rcode)
 
-        builder.add_u16(parser.id)
+        builder.add_u16(request.header.id)
         builder.add_u16(flags)
-        builder.add_u16(len(parser.questions))
+        builder.add_u16(len(request.questions))
         builder.add_u16(len(answer_records))
         builder.add_u16(len(authority_records))
         builder.add_u16(len(additional_records))
 
-        for question in parser.questions:
+        for question in request.questions:
             builder.add_bytes(self._build_question(question))
 
         for record in answer_records:

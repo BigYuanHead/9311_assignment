@@ -15,22 +15,24 @@ class rootHints_C:
 
     def __init__(self, filename):
         self.filename = filename
+
+        # parser storages
         self.ns_records = []
         self.a_records = []
         self.current_ttl = 0
 
     # =========== helper func ===========
-    def _clean_line(self, line):
+    def _clean_line(self, line: str):
         if ';' in line: # remove comment
             line = line.split(';', 1)[0]
 
         line = line.strip() # remove spaces
         return line
 
-    def _is_number(self, text):
+    def _is_number(self, text: str):
         return text.isdigit()
 
-    def _norm_name(self, name):
+    def _norm_name(self, name: str):
         return name.lower() # case insensitive
 
     def _parse_TTLline(self, parts):
@@ -78,28 +80,28 @@ class rootHints_C:
             return
 
         if rr_type == 'NS':
-            record = DDT.rootRecord_S(
-                owner_name,
-                ttl,
-                rr_class,
-                DDT.dnsType_ENUM.NS,
-                rdata
+            record = DDT.a_rr_S(
+                name=owner_name,
+                rr_type=DDT.dnsType_ENUM.NS,
+                rr_class=rr_class,
+                ttl=ttl,
+                rdata=rdata
             )
             self.ns_records.append(record)
 
         elif rr_type == 'A':
-            record = DDT.rootRecord_S(
-                owner_name,
-                ttl,
-                rr_class,
-                DDT.dnsType_ENUM.A,
-                rdata
+            record = DDT.a_rr_S(
+                name=owner_name,
+                rr_type=DDT.dnsType_ENUM.A,
+                rr_class=rr_class,
+                ttl=ttl,
+                rdata=rdata
             )
             self.a_records.append(record)
 
 
     def parse(self):
-
+        """ resolve root hints and storage in this parser """
         with open(self.filename, 'r') as file:
             for line in file:
 
@@ -140,3 +142,42 @@ class rootHints_C:
                 result.append(record)
 
         return result
+
+    def find_local_result(self, question: DDT.a_question_S) -> DDT.resolutionResult_S | None:
+        """find local answer from parsed root hints"""
+
+        answers = []
+        authority = []
+        additional = []
+
+        qname = self._norm_name(question.qname)
+
+        # QNAME ., QTYPE NS
+        if qname == '.' and question.qtype == DDT.dnsType_ENUM.NS:
+            answers = self.get_rootNS_records()
+
+            for ns_record in answers:
+                a_records = self.get_records_with_name(ns_record.rdata)
+                for a_record in a_records:
+                    additional.append(a_record)
+
+            return DDT.resolutionResult_S(
+                answers,
+                authority,
+                additional,
+                DDT.flag_respondCode_ENUM.NOERROR
+            )
+
+        # QNAME root-server-name, QTYPE A
+        if question.qtype == DDT.dnsType_ENUM.A:
+            answers = self.get_records_with_name(question.qname)
+
+            if len(answers) > 0:
+                return DDT.resolutionResult_S(
+                    answers,
+                    authority,
+                    additional,
+                    DDT.flag_respondCode_ENUM.NOERROR
+                )
+
+        return None

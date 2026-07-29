@@ -1,6 +1,5 @@
 import src.helpers.myLogger as myL
 import dataStructures.dns_dataTypes as DDT
-import src.request_parser as RP
 
 
 log = myL.logger_C('CNAME', debug=True)
@@ -26,9 +25,9 @@ class cnameHandler_C:
         return name.lower()
 
     def find_cname(self,
-                   parser: RP.dnsParser_C,
+                   response: DDT.dns_request_S,
                    question: DDT.a_question_S):
-        for record in parser.answers:
+        for record in response.answers:
             if self._norm_name(record.name) == self._norm_name(question.qname):
                 if record.rr_type == DDT.dnsType_ENUM.CNAME:
                     return record
@@ -81,5 +80,3 @@ class cnameHandler_C:
             result.append(record)
 
         return result
-
-        

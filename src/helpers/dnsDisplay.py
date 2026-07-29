@@ -78,7 +78,7 @@ class dnsDisplay_C:
                 rr.name,
                 rr.ttl,
                 self._class_name(rr.rr_class),
-                self._type_name(rr.type),
+                self._type_name(rr.rr_type),
                 rr.rdata
             )
             print(line)

@@ -33,14 +33,6 @@ import src.iterOpt.noData_handler as NDH
 log = myL.logger_C('', debug=True)
 
 
-@dataclass
-class resolutionResult_DC:
-    answers: list
-    authority: list
-    additional: list
-    rcode: int
-
-
 
 
 @dataclass
@@ -70,7 +62,7 @@ class iterativeResolver_C:
         return name.lower()
 
     def _servfail(self):
-        return resolutionResult_DC(
+        return DDT.resolutionResult_S(
             [],
             [],
             [],
@@ -109,24 +101,24 @@ class iterativeResolver_C:
         return True
 
     def _check_response(self,
-                        parser: RP.dnsParser_C,
+                        response: DDT.dns_request_S,
                         expected_txid,
                         expected_question: DDT.a_question_S):
 
-        if parser.id != expected_txid:
+        if response.header.id != expected_txid:
             log.debug('[upstream] txid not match')
             return False
 
-        if not FO.is_upstreamResponse_valid(parser.flags):
-            flags = FO.decode(parser.flags)
+        if not FO.is_upstreamResponse_valid(response.header.flags):
+            flags = FO.decode(response.header.flags)
             log.debug('[upstream] not expected flags {}'.format(flags))
             return False
 
-        if len(parser.questions) != 1:
+        if len(response.questions) != 1:
             log.debug('[upstream] question count not 1')
             return False
 
-        response_question = parser.questions[0]
+        response_question = response.questions[0]
 
         if self._norm_name(response_question.qname) != self._norm_name(expected_question.qname):
             return False
@@ -165,12 +157,12 @@ class iterativeResolver_C:
                 return None
 
             parser = RP.dnsParser_C(data=response_data)
-            parser.parse()
+            response = parser.parse()
 
-            if not self._check_response(parser, txid, question):
+            if not self._check_response(response, txid, question):
                 return None
 
-            return parser
+            return response
 
         except socket.timeout:
             log.warn('timeout from {}'.format(server_ip))
@@ -184,11 +176,11 @@ class iterativeResolver_C:
             sock.close()
 
     def _get_matching_answers(self,
-                              parser: RP.dnsParser_C,
+                              response: DDT.dns_request_S,
                               question: DDT.a_question_S):
         result = []
 
-        for record in parser.answers:
+        for record in response.answers:
             if self._norm_name(record.name) == self._norm_name(question.qname):
                 if record.rr_type == question.qtype:
                     result.append(record)
@@ -258,24 +250,24 @@ class iterativeResolver_C:
                     DDT.dnsType_ENUM.mapper[state.current_question.qtype]
                 ))
 
-                parser = self._ask_server(server_ip, state.current_question)
+                response = self._ask_server(server_ip, state.current_question)
 
-                if parser is None:
+                if response is None:
                     log.debug('no usable response from {}'.format(server_ip))
                     continue
 
-                rcode = FO.get_rcode(parser.flags)
+                rcode = FO.get_rcode(response.header.flags)
                 log.debug('response from {}, rcode={}, answer={}, authority={}, additional={}'.format(
                     server_ip,
                     rcode,
-                    len(parser.answers),
-                    len(parser.authority),
-                    len(parser.additional)
+                    len(response.answers),
+                    len(response.authority),
+                    len(response.additional)
                 ))
 
                 if rcode == DDT.flag_respondCode_ENUM.NXDOMAIN:
                     log.info('NXDOMAIN for {}'.format(state.current_question.qname))
-                    return resolutionResult_DC(
+                    return DDT.resolutionResult_S(
                         [],
                         [],
                         [],
@@ -287,7 +279,7 @@ class iterativeResolver_C:
                     continue
 
                 answers = self._get_matching_answers(
-                    parser,
+                    response,
                     state.current_question
                 )
 
@@ -323,17 +315,17 @@ class iterativeResolver_C:
                         state.current_question.qtype,
                         len(final_answers)
                     ))
-                    return resolutionResult_DC(
+                    return DDT.resolutionResult_S(
                         final_answers,
-                        parser.authority,
-                        parser.additional,
+                        response.authority,
+                        response.additional,
                         DDT.flag_respondCode_ENUM.NOERROR
                     )
 
                 # 2. No requested answer. Check CNAME chasing.
                 if state.current_question.qtype != DDT.dnsType_ENUM.CNAME:
                     cname_record = CN_handler.find_cname(
-                        parser,
+                        response,
                         state.current_question
                     )
 
@@ -351,22 +343,22 @@ class iterativeResolver_C:
 
                 # 3. No requested answer and no CNAME. Check authoritative NODATA.
                 if ND_handler.is_authoritative_nodata(
-                    parser,
+                    response,
                     state.current_question
                 ):
                     final_answers = CN_handler.build_final_answers([])
                     log.info('authoritative NODATA for {}'.format(
                         state.current_question.qname
                     ))
-                    return resolutionResult_DC(
+                    return DDT.resolutionResult_S(
                         final_answers,
-                        parser.authority,
-                        parser.additional,
+                        response.authority,
+                        response.additional,
                         DDT.flag_respondCode_ENUM.NOERROR
                     )
 
                 # 4. No answer, no CNAME, no NODATA. Check referral / nested A lookup.
-                referral = NL_handler.analyse(parser)
+                referral = NL_handler.analyse(response)
 
                 if referral.is_referral:
 

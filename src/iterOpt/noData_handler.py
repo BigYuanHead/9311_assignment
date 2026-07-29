@@ -2,7 +2,6 @@ import src.helpers.myLogger as myL
 from src.helpers.flagOpt import dnsFlag_C as FO
 
 import dataStructures.dns_dataTypes as DDT
-import src.request_parser as RP
 
 
 log = myL.logger_C('NODATA', debug=True)
@@ -24,9 +23,9 @@ class nodataHandler_C:
         return name.lower()
 
     def _has_requested_type(self,
-                            parser: RP.dnsParser_C,
+                            response: DDT.dns_request_S,
                             question: DDT.a_question_S):
-        for record in parser.answers:
+        for record in response.answers:
             if self._norm_name(record.name) == self._norm_name(question.qname):
                 if record.rr_type == question.qtype:
                     return True
@@ -34,9 +33,9 @@ class nodataHandler_C:
         return False
 
     def _has_cname(self,
-                   parser: RP.dnsParser_C,
+                   response: DDT.dns_request_S,
                    question: DDT.a_question_S):
-        for record in parser.answers:
+        for record in response.answers:
             if self._norm_name(record.name) == self._norm_name(question.qname):
                 if record.rr_type == DDT.dnsType_ENUM.CNAME:
                     return True
@@ -44,9 +43,9 @@ class nodataHandler_C:
         return False
 
     def is_authoritative_nodata(self,
-                                parser: RP.dnsParser_C,
+                                response: DDT.dns_request_S,
                                 question: DDT.a_question_S):
-        flags = FO.decode(parser.flags)
+        flags = FO.decode(response.header.flags)
 
         if flags.RCODE != DDT.flag_respondCode_ENUM.NOERROR:
             return False
@@ -54,10 +53,10 @@ class nodataHandler_C:
         if flags.AA != 1:
             return False
 
-        if self._has_requested_type(parser, question):
+        if self._has_requested_type(response, question):
             return False
 
-        if self._has_cname(parser, question):
+        if self._has_cname(response, question):
             return False
 
         log.info('[nodata] authoritative NODATA for {}'.format(
