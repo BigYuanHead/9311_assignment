@@ -38,6 +38,10 @@ class dnsDisplay_C:
     def _print_flags(self):
         flags = self.request.header.flag_readable
         id = self.request.header.id
+        rcode = DDT.flag_respondCode_ENUM.mapper.get(
+            flags.RCODE,
+            str(flags.RCODE)
+        )
 
         print('ID: {}'.format(id))
         print('--- FLAGS ---')
@@ -47,7 +51,7 @@ class dnsDisplay_C:
         print('TC: {}'.format(bool(flags.TC)))
         print('RD: {}'.format(bool(flags.RD)))
         print('RA: {}'.format(bool(flags.RA)))
-        print('RCODE: {}'.format(DDT.flag_respondCode_ENUM.mapper[flags.RCODE]))
+        print('RCODE: {}'.format(rcode))
         print()
 
     def _print_counts(self):

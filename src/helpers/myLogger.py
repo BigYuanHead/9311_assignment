@@ -53,7 +53,7 @@ class logger_C:
         return '{}{}{}'.format(color, text, self.RESET)
 
     def _log(self, level, message):
-        if level == 'DEBUG' and not self.debug_mode:
+        if not self.debug_mode:
             return
 
         time_text = self._time_text()
@@ -91,6 +91,9 @@ class logger_C:
         self._log('ERROR', message)
 
     def line(self):
+        if not self.debug_mode:
+            return
+
         print(SEP_LINE)
 
 

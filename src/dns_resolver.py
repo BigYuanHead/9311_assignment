@@ -42,6 +42,15 @@ class resolver_C:
         log.info('Resolver listening on 127.0.0.1:{}'.format(self.listen_port))
 
 
+    def _build_SERVFAIL(self, request: DDT.dns_request_S) -> bytes:
+        return self.response_builder.build_response(
+            request,
+            [],
+            [],
+            [],
+            rcode=DDT.flag_respondCode_ENUM.SERVFAIL
+        )
+
 
     def _handle_query(self, query_data: bytes):
         """
@@ -52,17 +61,23 @@ class resolver_C:
         parser = RP.dnsParser_C(filename=None, data=query_data)
         request = parser.parse()
 
-        # if query question empty, return SERVFAIL
-        if len(request.questions) == 0:
-            return self.response_builder.build_response(
-                request,
-                [],
-                [],
-                [],
-                rcode=DDT.flag_respondCode_ENUM.SERVFAIL
-            )
+        # if query malformed or question empty, return SERVFAIL
+        if request.is_malformed or len(request.questions) == 0:
+            return self._build_SERVFAIL(request)
 
         question = request.questions[0]
+
+        supported_types = (
+            DDT.dnsType_ENUM.A,
+            DDT.dnsType_ENUM.NS,
+            DDT.dnsType_ENUM.CNAME,
+            DDT.dnsType_ENUM.PTR,
+            DDT.dnsType_ENUM.MX
+        )
+
+        # unsupported client QTYPE -> SERVFAIL
+        if question.qtype not in supported_types:
+            return self._build_SERVFAIL(request)
 
         # 1. if root require -> find in local root hints file
         result = self.root_hints.find_local_result(question)
@@ -113,8 +128,10 @@ class resolver_C:
             try:
                 response_data = self._handle_query(query_data)
             except Exception as e:
-                raise e
-                # log.warn('resolver warning: {}'.format(e))
-                # continue
+                log.exception(e)
+
+                parser = RP.dnsParser_C(filename=None, data=query_data)
+                request = parser.parse()
+                response_data = self._build_SERVFAIL(request)
 
             self.sock.sendto(response_data, client_address)

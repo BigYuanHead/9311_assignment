@@ -51,6 +51,16 @@ class malformedPkg_E(Exception):
         return malformedPkg_E('RDLENGTH out of packet boundary')
 
     @staticmethod
+    def rdata_name_boundary():
+        return malformedPkg_E('encoded name exceeds RDLENGTH boundary')
+
+    @staticmethod
+    def invalid_rdata(rr_type: int):
+        return malformedPkg_E(
+            'invalid RDATA for supported TYPE {}'.format(rr_type)
+        )
+
+    @staticmethod
     def set_error_request(request: DDT.dns_request_S, e):
         request.is_malformed = True
         request.malformed_reason = e.reason
@@ -110,7 +120,10 @@ class dnsParser_C:
             raise malformedPkg_E.packet_boundary()
 
 
-    def _decode_name(self, start_pos=None) -> tuple[str, int]:
+    def _decode_name(self,
+                     start_pos=None,
+                     end_pos=None
+                     ) -> tuple[str, int]:
         """
         decode DNS name
 
@@ -130,8 +143,13 @@ class dnsParser_C:
         pointerJump_counter = 0
         jumped = False
         next_pos = tmp_pos
+        expanded_name_length = 1 # final 00
 
         while True:
+            if end_pos is not None and not jumped:
+                if tmp_pos >= end_pos:
+                    raise malformedPkg_E.rdata_name_boundary()
+
             self._check_pos(tmp_pos)
 
             length = self.data[tmp_pos]
@@ -145,6 +163,10 @@ class dnsParser_C:
 
             # compression pointer 11
             if length & 0xC0 == 0xC0:
+                if end_pos is not None and not jumped:
+                    if tmp_pos >= end_pos:
+                        raise malformedPkg_E.rdata_name_boundary()
+
                 self._check_pos(tmp_pos)
 
                 second_byte = self.data[tmp_pos]
@@ -182,11 +204,20 @@ class dnsParser_C:
                 log.warn(f"DNS label too long at offset: {tmp_pos-1}, byte: {length}")
                 raise malformedPkg_E.label_too_long()
 
+            if end_pos is not None and not jumped:
+                if tmp_pos + length > end_pos:
+                    raise malformedPkg_E.rdata_name_boundary()
+
             self._check_range(tmp_pos, length)
 
             label_bytes = self.data[tmp_pos:tmp_pos + length]
             label = label_bytes.decode(errors='replace')
             labels.append(label)
+
+            expanded_name_length = expanded_name_length + length + 1
+            if expanded_name_length > Gcfg.FULL_NAME_LENGTH:
+                log.warn(f"DNS name too long, length: {expanded_name_length}")
+                raise malformedPkg_E.name_too_long()
 
             tmp_pos = tmp_pos + length
 
@@ -194,10 +225,6 @@ class dnsParser_C:
             name = '.'
         else:
             name = '.'.join(labels) + '.'
-
-        if len(name) > Gcfg.FULL_NAME_LENGTH:
-            log.warn(f"DNS name too long, length: {len(name)}")
-            raise malformedPkg_E.name_too_long()
 
         if start_pos is None:
             self.pointer = next_pos
@@ -212,6 +239,8 @@ class dnsParser_C:
             ID FLAGS QDCOUNT ANCOUNT NSCOUNT ARCOUNT
         """
         _header = self.request.header
+
+        self._check_range(self.pointer, 12)
 
         _header.id, _np = self.bo.read_u16(self.pointer)
         _header.flags, _np = self.bo.read_u16(_np)
@@ -237,6 +266,9 @@ class dnsParser_C:
         """ one question """
 
         qname, _np = self._decode_name() # QNAME
+
+        self._check_range(_np, 4)
+
         qtype, _np = self.bo.read_u16(_np)  # QTYPE
         qclass, _np = self.bo.read_u16(_np) # QCLASS
 
@@ -259,8 +291,13 @@ class dnsParser_C:
 
         log.debug(f"parse rdata, rr_type={rr_type}, rdlength={rdlength}, rdata_start={rdata_start}")
 
+        rdata_end = rdata_start + rdlength
+
         # A
-        if rr_type == DDT.dnsType_ENUM.A and rdlength == 4: #4 bytes
+        if rr_type == DDT.dnsType_ENUM.A:
+            if rdlength != 4:
+                raise malformedPkg_E.invalid_rdata(rr_type)
+
             ip_bytes = self.bo.data[rdata_start:rdata_start+4]
             rdata = '{}.{}.{}.{}'.format(ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3])
             return rdata
@@ -268,22 +305,38 @@ class dnsParser_C:
         # NS / CNAME / PTR
         if rr_type in (DDT.dnsType_ENUM.NS,
                        DDT.dnsType_ENUM.CNAME,
-                       DDT.dnsType_ENUM.PTR) and rdlength > 0:
-            name, next_pos = self._decode_name(rdata_start)
-            if next_pos <= rdata_start + rdlength:
+                       DDT.dnsType_ENUM.PTR):
+            if rdlength == 0:
+                raise malformedPkg_E.invalid_rdata(rr_type)
+
+            name, next_pos = self._decode_name(
+                rdata_start,
+                rdata_end
+            )
+            if next_pos == rdata_end:
                 return name
 
+            raise malformedPkg_E.invalid_rdata(rr_type)
+
         # MX
-        if rr_type == DDT.dnsType_ENUM.MX and rdlength > 2:
+        if rr_type == DDT.dnsType_ENUM.MX:
+            if rdlength <= 2:
+                raise malformedPkg_E.invalid_rdata(rr_type)
+
             # priority
             first_byte = self.bo.data[rdata_start]
             second_byte = self.bo.data[rdata_start + 1]
             preference = (first_byte << 8) | second_byte
 
             # exchange name
-            exchange, next_pos = self._decode_name(rdata_start + 2)
-            if next_pos <= rdata_start + rdlength:
+            exchange, next_pos = self._decode_name(
+                rdata_start + 2,
+                rdata_end
+            )
+            if next_pos == rdata_end:
                 return '{} {}'.format(preference, exchange)
+
+            raise malformedPkg_E.invalid_rdata(rr_type)
 
         # unsupported or malformed
         log.warn(f"??unsupport rdata??")
@@ -297,6 +350,8 @@ class dnsParser_C:
         tmp_rr = DDT.a_rr_S()
 
         tmp_rr.name, _np = self._decode_name() # NAME
+
+        self._check_range(_np, 10)
 
         tmp_rr.rr_type, _np = self.bo.read_u16(_np) # TYPE
         tmp_rr.rr_class, _np = self.bo.read_u16(_np) # CLASS
@@ -334,6 +389,7 @@ class dnsParser_C:
         Parse full DNS message.
 
         This method catches malformedDNSPacket_E and still returns request.
+        
         Caller can check:
             request.is_malformed
             request.malformed_reason

@@ -1,12 +1,7 @@
-import os
 import sys
-
-import src.helpers.myLogger as myL
 
 import src.helpers.dnsDisplay as DDSP
 from src.request_parser import dnsParser_C
-
-FILE_PATH = "dns-assignment-resources/example.com-MX-12002-response.bin"
 
 def main(filename=None):
 
@@ -24,4 +19,4 @@ def main(filename=None):
 
 
 if __name__ == "__main__":
-    main(FILE_PATH)
+    main()
