@@ -63,20 +63,14 @@ class resolver_C:
 
         # if query malformed or question empty, return SERVFAIL
         if request.is_malformed or len(request.questions) == 0:
+            log.warn("malformed question")
             return self._build_SERVFAIL(request)
 
         question = request.questions[0]
 
-        supported_types = (
-            DDT.dnsType_ENUM.A,
-            DDT.dnsType_ENUM.NS,
-            DDT.dnsType_ENUM.CNAME,
-            DDT.dnsType_ENUM.PTR,
-            DDT.dnsType_ENUM.MX
-        )
-
         # unsupported client QTYPE -> SERVFAIL
-        if question.qtype not in supported_types:
+        if question.qtype not in DDT.dnsType_ENUM.mapper:
+            log.warn(f"question type: {question.qtype} not supported")
             return self._build_SERVFAIL(request)
 
         # 1. if root require -> find in local root hints file
