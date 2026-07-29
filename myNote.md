@@ -58,3 +58,16 @@ response_analyser.is_authoritative_nodata()
           ↓ 如果不是
 response_analyser.find_referral()
 ```
+
+查询 A
+├─ Answer 有 A
+│  └─ final，返回 A
+│
+├─ Answer 有 CNAME + A
+│  └─ 追踪 CNAME，final，返回 CNAME + A
+│
+├─ Answer 只有 CNAME
+│  └─ 返回已有 CNAME，并通过 next_name 通知 resolver 继续查询
+│
+└─ Answer 什么都没有
+   └─ 不属于 answer path，交给后面判断 NODATA 或 referral
