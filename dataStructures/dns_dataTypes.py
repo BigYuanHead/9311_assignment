@@ -117,7 +117,7 @@ class resolutionResult_S:
     authority: list[a_rr_S]
     additional: list[a_rr_S]
     rcode: int
-
+    aa: int = 0
 
 
 

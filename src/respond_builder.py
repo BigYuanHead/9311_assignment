@@ -105,10 +105,15 @@ class dnsResponseBuilder_C:
                        answer_records: list[DDT.a_rr_S],
                        authority_records: list[DDT.a_rr_S],
                        additional_records: list[DDT.a_rr_S],
-                       rcode=0):
+                       rcode=0,
+                       aa=0):
         builder = BO.byteBuilder_C()
 
-        flags = FO.make_clientResponse_flags(request.header.flags, rcode)
+        flags = FO.make_clientResponse_flags(
+            request.header.flags,
+            rcode,
+            aa
+        )
 
         builder.add_u16(request.header.id)
         builder.add_u16(flags)

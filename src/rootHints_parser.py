@@ -165,7 +165,8 @@ class rootHints_C:
                 answers,
                 authority,
                 additional,
-                DDT.flag_respondCode_ENUM.NOERROR
+                DDT.flag_respondCode_ENUM.NOERROR,
+                aa=0
             )
 
         # QNAME root-server-name, QTYPE A
@@ -177,7 +178,8 @@ class rootHints_C:
                     answers,
                     authority,
                     additional,
-                    DDT.flag_respondCode_ENUM.NOERROR
+                    DDT.flag_respondCode_ENUM.NOERROR,
+                    aa=0
                 )
 
         return None

@@ -53,7 +53,9 @@ class dnsFlag_C:
         return flags
 
     @staticmethod
-    def make_clientResponse_flags(query_flags: int, rcode: int = 0):
+    def make_clientResponse_flags(query_flags: int,
+                                  rcode: int = 0,
+                                  aa: int = 0):
         """
             respond client using
 
@@ -64,6 +66,7 @@ class dnsFlag_C:
             Set:
             - QR = 1
             - RA = 1
+            - AA = given aa
             - RCODE = given rcode
         """
 
@@ -72,7 +75,7 @@ class dnsFlag_C:
         response = flag_S(
             QR = 1,
             Opcode = query.Opcode,
-            AA = 0,
+            AA = aa,
             TC = 0,
             RD = query.RD,
             RA = 1,

@@ -89,7 +89,8 @@ class resolver_C:
                     cached_answers,
                     [],
                     [],
-                    DDT.flag_respondCode_ENUM.NOERROR
+                    DDT.flag_respondCode_ENUM.NOERROR,
+                    aa=0
                 )
             
             else:
@@ -108,7 +109,8 @@ class resolver_C:
             result.answers,
             result.authority,
             result.additional,
-            rcode=result.rcode
+            rcode=result.rcode,
+            aa=result.aa
         )
 
 

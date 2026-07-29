@@ -67,7 +67,8 @@ class iterativeResolver_C:
             [],
             [],
             [],
-            DDT.flag_respondCode_ENUM.SERVFAIL
+            DDT.flag_respondCode_ENUM.SERVFAIL,
+            aa=0
         )
 
     def _get_rootServer_IPs(self) -> list[str]:
@@ -107,6 +108,21 @@ class iterativeResolver_C:
             result.append(record)
 
         return result
+
+    def _get_result_AA(self,
+                       response: DDT.dns_request_S,
+                       cname_chain: list[DDT.a_rr_S]
+                       ) -> int:
+        """
+            copy upstream AA only when client records
+            come from this one upstream response
+        """
+
+        if len(cname_chain) > 0:
+            return 0
+
+        flags = FO.decode(response.header.flags)
+        return flags.AA
 
     # =========== budget ===========
     def _remaining_time(self, context: resolveContext_DC) -> float:
@@ -255,12 +271,17 @@ class iterativeResolver_C:
                         continue
                     # IS AA
                     log.info('NXDOMAIN for {}'.format(current_question.qname))
+                    result_AA = self._get_result_AA(
+                        response,
+                        cname_chain
+                    )
                     # END - AA no rr
                     return DDT.resolutionResult_S(
                         cname_chain,
                         [],
                         [],
-                        DDT.flag_respondCode_ENUM.NXDOMAIN
+                        DDT.flag_respondCode_ENUM.NXDOMAIN,
+                        aa=result_AA
                     )
 
                 ## ERROR
@@ -298,11 +319,17 @@ class iterativeResolver_C:
                         len(final_answers)
                     ))
 
+                    result_AA = self._get_result_AA(
+                        response,
+                        cname_chain
+                    )
+
                     return DDT.resolutionResult_S(
                         final_answers,
-                        response.authority,
-                        response.additional,
-                        DDT.flag_respondCode_ENUM.NOERROR
+                        [],
+                        [],
+                        DDT.flag_respondCode_ENUM.NOERROR,
+                        aa=result_AA
                     )
 
                 ## no final answer, BUT CNAME !!
@@ -335,11 +362,16 @@ class iterativeResolver_C:
                     log.info('authoritative NODATA for {}'.format(
                         current_question.qname
                     ))
+                    result_AA = self._get_result_AA(
+                        response,
+                        cname_chain
+                    )
                     return DDT.resolutionResult_S(
                         cname_chain,
-                        response.authority,
-                        response.additional,
-                        DDT.flag_respondCode_ENUM.NOERROR
+                        [],
+                        [],
+                        DDT.flag_respondCode_ENUM.NOERROR,
+                        aa=result_AA
                     )
 
                 ## >>>>>>>>>>>>>>>>> referral >>>>>>>>>>>>>>>>>
