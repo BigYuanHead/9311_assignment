@@ -70,7 +70,8 @@ class resolver_C:
         if result is not None:
             log.success('answer from root hints')
 
-        else:
+        # root hints can not answer
+        else: 
             # 2. if Cache?
             cached_answers = self.cache.get_chain(question)
             if cached_answers is not None:
@@ -81,7 +82,7 @@ class resolver_C:
                     [],
                     DDT.flag_respondCode_ENUM.NOERROR
                 )
-
+            
             else:
                 # 3. Iterative resolver
                 log.info('NO cache, start iterative resolution')

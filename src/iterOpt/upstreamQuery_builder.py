@@ -15,10 +15,10 @@ class upstreamQueryBuilder_C:
     def __init__(self):
         pass
 
-    def _make_txid(self):
+    def _make_txid(self) -> int:
         return random.randint(0, 65535) # 16 bits
 
-    def _encode_name(self, name: str):
+    def _encode_name(self, name: str) -> bytes:
         """ domain name string -> DNS wire format """
 
         result = bytearray()
@@ -42,7 +42,7 @@ class upstreamQueryBuilder_C:
                     qname: str,
                     qtype: int,
                     qclass: int
-                    ):
+                    ) -> tuple[int, bytes]:
         """
         build std non recursive upstream DNS query
 

@@ -13,35 +13,35 @@ class rootHints_C:
         put all root hints records in here
     """
 
-    def __init__(self, filename):
+    def __init__(self, filename: str):
         self.filename = filename
 
         # parser storages
-        self.ns_records = []
-        self.a_records = []
-        self.current_ttl = 0
+        self.ns_records: list[DDT.a_rr_S] = []
+        self.a_records: list[DDT.a_rr_S] = []
+        self.current_ttl: int = 0
 
     # =========== helper func ===========
-    def _clean_line(self, line: str):
+    def _clean_line(self, line: str) -> str:
         if ';' in line: # remove comment
             line = line.split(';', 1)[0]
 
         line = line.strip() # remove spaces
         return line
 
-    def _is_number(self, text: str):
+    def _is_number(self, text: str) -> bool:
         return text.isdigit()
 
-    def _norm_name(self, name: str):
+    def _norm_name(self, name: str) -> str:
         return name.lower() # case insensitive
 
-    def _parse_TTLline(self, parts):
+    def _parse_TTLline(self, parts: list[str]) -> None:
         if len(parts) >= 2 and self._is_number(parts[1]):
             self.current_ttl = int(parts[1])
 
 
     # ============ parse =============
-    def _parse_one_recordLine(self, parts):
+    def _parse_one_recordLine(self, parts: list[str]) -> None:
 
         owner_name = parts[0]
         
@@ -100,7 +100,7 @@ class rootHints_C:
             self.a_records.append(record)
 
 
-    def parse(self):
+    def parse(self) -> None:
         """ resolve root hints and storage in this parser """
         with open(self.filename, 'r') as file:
             for line in file:
@@ -121,20 +121,20 @@ class rootHints_C:
                 self._parse_one_recordLine(parts)
 
 
-    def get_rootNS_records(self):
+    def get_rootNS_records(self) -> list[DDT.a_rr_S]:
         """return root NS records in file order"""
 
-        result = []
+        result: list[DDT.a_rr_S] = []
         for record in self.ns_records:
             if self._norm_name(record.name) == '.':
                 result.append(record)
 
         return result
 
-    def get_records_with_name(self, name):
+    def get_records_with_name(self, name: str) -> list[DDT.a_rr_S]:
         """ NS -> A records """
 
-        result = []
+        result: list[DDT.a_rr_S] = []
         check_name = self._norm_name(name)
 
         for record in self.a_records:
@@ -146,9 +146,9 @@ class rootHints_C:
     def find_local_result(self, question: DDT.a_question_S) -> DDT.resolutionResult_S | None:
         """find local answer from parsed root hints"""
 
-        answers = []
-        authority = []
-        additional = []
+        answers: list[DDT.a_rr_S] = []
+        authority: list[DDT.a_rr_S] = []
+        additional: list[DDT.a_rr_S] = []
 
         qname = self._norm_name(question.qname)
 

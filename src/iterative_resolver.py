@@ -2,47 +2,42 @@
 Iterative DNS resolver.
 
 Main idea:
-    client question
-    -> ask root
-    -> follow referral
-    -> use glue if possible
-    -> if no glue, temporarily resolve NS hostname A record
-    -> continue original question
+    resolve one logical question at a time
+    -> ask candidate servers in order
+    -> return final answer / NODATA / NXDOMAIN
+    -> follow CNAME from root when required
+    -> follow referral with glue
+    -> resolve NS hostname A for referral without glue
 """
 
 
 
-import socket
 import time
 from dataclasses import dataclass
 
+import configs.global_cfg as Gcfg
 import src.helpers.myLogger as myL
 from src.helpers.flagOpt import dnsFlag_C as FO
 
 import dataStructures.dns_dataTypes as DDT
 
-import src.request_parser as RP
-import src.upstreamQuery_builder as uQb
 import src.rootHints_parser as RhP
-
-import src.iterOpt.nested_lookup_handler as NLH
-import src.iterOpt.cname_handler as CH
-import src.iterOpt.noData_handler as NDH
+import src.iterOpt.response_analyser as RA
+import src.iterOpt.upstream_client as UC
 
 
-log = myL.logger_C('', debug=True)
+log = myL.logger_C('', debug=Gcfg.ITEROR_DEBUG)
 
 
 
 
 @dataclass
-class resolveState_DC:
-    current_question: DDT.a_question_S
-    current_servers: list
+class resolveContext_DC:
+    """ share all limitations """
     attempt_counter: int
-    referral_depth: int
+    referral_counter: int
     start_time: float
-    total_cap: int
+    total_time: float # timeout using
 
 
 
@@ -53,15 +48,21 @@ class iterativeResolver_C:
                  timeout):
         self.root_hints = root_hints
         self.timeout = int(timeout)
-        self.query_builder = uQb.upstreamQueryBuilder_C()
 
-        self.max_attempts = 50
-        self.max_referrals = 10
+        self.max_attempts = Gcfg.MAX_ATTEMPTS
+        self.max_referrals = Gcfg.MAX_REFERRALS
+        self.max_cname_depth = Gcfg.MAX_CNAME_DEPTH
 
-    def _norm_name(self, name: str):
+        self.upstream_client = UC.upstreamClient_C()
+        self.response_analyser = RA.responseAnalyser_C(
+            self.max_cname_depth
+        )
+
+    # =========== common helper ===========
+    def _norm_name(self, name: str) -> str:
         return name.lower()
 
-    def _servfail(self):
+    def _servfail(self) -> DDT.resolutionResult_S:
         return DDT.resolutionResult_S(
             [],
             [],
@@ -69,188 +70,170 @@ class iterativeResolver_C:
             DDT.flag_respondCode_ENUM.SERVFAIL
         )
 
-    def _get_rootServer_ips(self):
-        result = []
-        root_ns_records = self.root_hints.get_rootNS_records()
+    def _get_rootServer_ips(self) -> list[str]:
+        result: list[str] = []
+        root_ns_records: list[DDT.a_rr_S] = self.root_hints.get_rootNS_records()
 
         for ns_record in root_ns_records:
-            a_records = self.root_hints.get_records_with_name(ns_record.rdata)
+            a_records: list[DDT.a_rr_S] = self.root_hints.get_records_with_name(
+                ns_record.rdata
+            )
 
             for a_record in a_records:
                 result.append(a_record.rdata)
 
         return result
 
-    def _can_continue(self, state: resolveState_DC):
-        if state.attempt_counter >= self.max_attempts:
-            log.debug('reach max attempts')
-            return False
-
-        if state.referral_depth >= self.max_referrals:
-            log.debug('reach max referral depth')
-            return False
-
-        if time.time() - state.start_time > state.total_cap:
-            log.debug('total timeout')
-            return False
-
-        if len(state.current_servers) == 0:
-            log.debug('no current servers')
-            return False
-
-        return True
-
-    def _check_response(self,
-                        response: DDT.dns_request_S,
-                        expected_txid,
-                        expected_question: DDT.a_question_S):
-
-        if response.header.id != expected_txid:
-            log.debug('[upstream] txid not match')
-            return False
-
-        if not FO.is_upstreamResponse_valid(response.header.flags):
-            flags = FO.decode(response.header.flags)
-            log.debug('[upstream] not expected flags {}'.format(flags))
-            return False
-
-        if len(response.questions) != 1:
-            log.debug('[upstream] question count not 1')
-            return False
-
-        response_question = response.questions[0]
-
-        if self._norm_name(response_question.qname) != self._norm_name(expected_question.qname):
-            return False
-
-        if response_question.qtype != expected_question.qtype:
-            return False
-
-        if response_question.qclass != expected_question.qclass:
-            return False
-
-        return True
-
-    def _ask_server(self, server_ip, question: DDT.a_question_S):
-        txid, query_bytes = self.query_builder.build_query(
-            question.qname,
-            question.qtype,
-            question.qclass
+    def _make_question(self,
+                       name: str,
+                       rr_type: int,
+                       rr_class: int) -> DDT.a_question_S:
+        return DDT.a_question_S(
+            qname=name,
+            qtype=rr_type,
+            qclass=rr_class
         )
 
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(self.timeout)
+    def _build_final_answers(self,
+                             cname_chain: list[DDT.a_rr_S],
+                             final_records: list[DDT.a_rr_S]
+                             ) -> list[DDT.a_rr_S]:
+        result: list[DDT.a_rr_S] = []
 
-        try:
-            sock.sendto(query_bytes, (server_ip, 53))
-            response_data, address = sock.recvfrom(4096)
+        for record in cname_chain:
+            result.append(record)
 
-            source_ip = address[0]
-            source_port = address[1]
-
-            if source_ip != server_ip:
-                log.debug('[upstream] wrong source IP {}'.format(source_ip))
-                return None
-
-            if source_port != 53:
-                log.debug('[upstream] wrong source port {}'.format(source_port))
-                return None
-
-            parser = RP.dnsParser_C(data=response_data)
-            response = parser.parse()
-
-            if not self._check_response(response, txid, question):
-                return None
-
-            return response
-
-        except socket.timeout:
-            log.warn('timeout from {}'.format(server_ip))
-            return None
-
-        except Exception as e:
-            log.exception(e)
-            return None
-
-        finally:
-            sock.close()
-
-    def _get_matching_answers(self,
-                              response: DDT.dns_request_S,
-                              question: DDT.a_question_S):
-        result = []
-
-        for record in response.answers:
-            if self._norm_name(record.name) == self._norm_name(question.qname):
-                if record.rr_type == question.qtype:
-                    result.append(record)
+        for record in final_records:
+            result.append(record)
 
         return result
 
-    def resolve(self, question: DDT.a_question_S):
-        """
-        Main iterative resolver.
+    # =========== budget ===========
+    def _remaining_time(self, context: resolveContext_DC) -> float:
+        used_time = time.time() - context.start_time
+        return context.total_time - used_time
 
-        current_question:
-            what we are asking now
+    def _can_attempt(self, context: resolveContext_DC) -> bool:
+        if context.attempt_counter >= self.max_attempts:
+            log.debug('reach max attempts')
+            return False
 
-        current_servers:
-            which servers we ask now
+        if self._remaining_time(context) <= 0:
+            log.debug('reach total timeout')
+            return False
 
-        referral_handler:
-            owns referral stack and no-glue logic
-        """
+        return True
 
-        NL_handler = NLH.nestedLookupHandler_C()
-        CN_handler = CH.cnameHandler_C()
-        ND_handler = NDH.nodataHandler_C()
+    def _consume_referral(self, context: resolveContext_DC) -> bool:
+        if context.referral_counter >= self.max_referrals:
+            log.debug('reach max referrals')
+            return False
 
-        log.info('start resolve {} type {}'.format(
-            question.qname,
-            question.qtype
-        ))
+        context.referral_counter = context.referral_counter + 1
+        return True
 
-        state = resolveState_DC(
-            current_question=question,
-            current_servers=self._get_rootServer_ips(),
-            attempt_counter=0,
-            referral_depth=0,
-            start_time=time.time(),
-            total_cap=min(30, 50 * self.timeout)
-        )
+    # =========== nested NS lookup ===========
+    def _resolve_nameServer_ips(self,
+                                ns_names: list[str],
+                                rr_class: int,
+                                context: resolveContext_DC
+                                ) -> list[str]:
+        for ns_name in ns_names:
+
+            # starting each no-glue NS hostname lookup uses referral budget
+            if not self._consume_referral(context):
+                return []
+
+            log.info('no glue, lookup {}'.format(ns_name))
+
+            ns_question = self._make_question(
+                ns_name,
+                DDT.dnsType_ENUM.A,
+                rr_class
+            )
+
+            ns_result = self._resolve_question(ns_question, context)
+
+            if ns_result.rcode != DDT.flag_respondCode_ENUM.NOERROR:
+                log.debug('NS-name lookup failed {}'.format(ns_name))
+                continue
+
+            result: list[str] = []
+
+            for record in ns_result.answers:
+                if record.rr_type == DDT.dnsType_ENUM.A:
+                    result.append(record.rdata)
+
+            if len(result) > 0:
+                return result
+
+            log.debug('NS-name lookup has no A answer {}'.format(ns_name))
+
+        return []
+
+
+    def _resolve_question(self,
+                          question: DDT.a_question_S,
+                          context: resolveContext_DC
+                          ) -> DDT.resolutionResult_S:
+        """ one logical lookup """
+
+        # 1. start from root
+        current_question: DDT.a_question_S = question
+        candidateServer_IPs: list[str] = self._get_rootServer_ips()
+
+        cname_chain: list[DDT.a_rr_S] = []
+        visited_names: set[str] = {
+            self._norm_name(question.qname)
+        }
 
         while True:
-
             log.debug('current question: {} type {}'.format(
-                state.current_question.qname,
-                DDT.dnsType_ENUM.mapper[state.current_question.qtype]
+                current_question.qname,
+                DDT.dnsType_ENUM.mapper[current_question.qtype]
             ))
-            log.debug('current servers: \n{}'.format(state.current_servers))
+            log.debug(f"candidate server IPs: \n{candidateServer_IPs}")
             log.debug('attempts={}, referrals={}'.format(
-                state.attempt_counter,
-                state.referral_depth
+                context.attempt_counter,
+                context.referral_counter
             ))
 
-            if not self._can_continue(state):
-                log.warn('stop, cannot continue')
+            # STOP
+            if len(candidateServer_IPs) == 0:
+                log.debug('no candidate server IPs')
                 return self._servfail()
 
-            made_progress = False
+            moved_to_next_step = False
 
-            for server_ip in state.current_servers:
+            # candidate NS IP -> check answer or next level
+            for server_ip in candidateServer_IPs:
 
-                if state.attempt_counter >= self.max_attempts:
+                # limit
+                if not self._can_attempt(context):
                     return self._servfail()
-
-                state.attempt_counter = state.attempt_counter + 1
+                context.attempt_counter = context.attempt_counter + 1
 
                 log.debug('ask {} for {} type {}'.format(
                     server_ip,
-                    state.current_question.qname,
-                    DDT.dnsType_ENUM.mapper[state.current_question.qtype]
+                    current_question.qname,
+                    DDT.dnsType_ENUM.mapper[current_question.qtype]
                 ))
 
-                response = self._ask_server(server_ip, state.current_question)
+                remaining_time = self._remaining_time(context)
+
+                if remaining_time <= 0:
+                    return self._servfail()
+
+                query_timeout = min(
+                    self.timeout,
+                    remaining_time
+                )
+
+                response = self.upstream_client.ask(
+                    server_ip,
+                    current_question,
+                    query_timeout
+                )
 
                 if response is None:
                     log.debug('no usable response from {}'.format(server_ip))
@@ -265,56 +248,51 @@ class iterativeResolver_C:
                     len(response.additional)
                 ))
 
+                # terminal NXDOMAIN for this logical lookup
                 if rcode == DDT.flag_respondCode_ENUM.NXDOMAIN:
-                    log.info('NXDOMAIN for {}'.format(state.current_question.qname))
+                    log.info('NXDOMAIN for {}'.format(
+                        current_question.qname
+                    ))
                     return DDT.resolutionResult_S(
-                        [],
+                        cname_chain,
                         [],
                         [],
                         DDT.flag_respondCode_ENUM.NXDOMAIN
                     )
 
                 if rcode != DDT.flag_respondCode_ENUM.NOERROR:
-                    log.debug('skip server {}, rcode={}'.format(server_ip, rcode))
+                    log.debug('skip server {}, rcode={}'.format(
+                        server_ip,
+                        rcode
+                    ))
                     continue
 
-                answers = self._get_matching_answers(
+                # final answer or CNAME path
+                answer_path = self.response_analyser.find_answer_path(
                     response,
-                    state.current_question
+                    current_question,
+                    len(cname_chain),
+                    visited_names
                 )
 
-                log.debug('matching answers: {}'.format(len(answers)))
+                if answer_path.invalid_reason is not None:
+                    log.warn('[cname] {}'.format(
+                        answer_path.invalid_reason
+                    ))
+                    continue
 
-                # 1. We got matching answers.
-                if len(answers) > 0:
-
-                    # 1A. This answer is for internal NS-name A lookup.
-                    if NL_handler.has_pending_lookup():
-                        resumed, original_question, next_servers = NL_handler.resume_from_ns_answer(answers)
-
-                        if resumed:
-                            log.info('NS-name A lookup success, resume {}'.format(
-                                original_question.qname
-                            ))
-                            log.debug('next servers from NS A: {}'.format(next_servers))
-
-                            state.current_question = original_question
-                            state.current_servers = next_servers
-                            state.referral_depth = state.referral_depth + 1
-                            made_progress = True
-                            break
-
-                        log.debug('pending NS lookup has no A answer')
-                        continue
-
-                    # 1B. This answer is for original client question.
-                    final_answers = CN_handler.build_final_answers(answers)
+                if answer_path.is_final:
+                    final_answers = self._build_final_answers(
+                        cname_chain,
+                        answer_path.records
+                    )
 
                     log.success('final answer found for {} type {}, count={}'.format(
-                        state.current_question.qname,
-                        state.current_question.qtype,
+                        current_question.qname,
+                        current_question.qtype,
                         len(final_answers)
                     ))
+
                     return DDT.resolutionResult_S(
                         final_answers,
                         response.authority,
@@ -322,84 +300,111 @@ class iterativeResolver_C:
                         DDT.flag_respondCode_ENUM.NOERROR
                     )
 
-                # 2. No requested answer. Check CNAME chasing.
-                if state.current_question.qtype != DDT.dnsType_ENUM.CNAME:
-                    cname_record = CN_handler.find_cname(
-                        response,
-                        state.current_question
-                    )
+                if answer_path.next_name is not None:
+                    for record in answer_path.records:
+                        cname_chain.append(record)
 
-                    if cname_record is not None:
-                        if not CN_handler.can_chase(cname_record):
-                            return self._servfail()
+                    visited_names = answer_path.visited_names
 
-                        state.current_question = CN_handler.chase(
-                            cname_record,
-                            state.current_question
-                        )
-                        state.current_servers = self._get_rootServer_ips()
-                        made_progress = True
-                        break
-
-                # 3. No requested answer and no CNAME. Check authoritative NODATA.
-                if ND_handler.is_authoritative_nodata(
-                    response,
-                    state.current_question
-                ):
-                    final_answers = CN_handler.build_final_answers([])
-                    log.info('authoritative NODATA for {}'.format(
-                        state.current_question.qname
+                    log.info('[cname] chase {} -> {}'.format(
+                        current_question.qname,
+                        answer_path.next_name
                     ))
-                    return DDT.resolutionResult_S(
-                        final_answers,
-                        response.authority,
-                        response.additional,
-                        DDT.flag_respondCode_ENUM.NOERROR
+
+                    current_question = self._make_question(
+                        answer_path.next_name,
+                        current_question.qtype,
+                        current_question.qclass
                     )
-
-                # 4. No answer, no CNAME, no NODATA. Check referral / nested A lookup.
-                referral = NL_handler.analyse(response)
-
-                if referral.is_referral:
-
-                    # 4A. Referral with glue.
-                    if len(referral.glue_ips) > 0:
-                        log.info('referral with glue, move to next servers')
-                        log.debug('glue servers: \n{}'.format(referral.glue_ips))
-
-                        state.current_servers = referral.glue_ips
-                        state.referral_depth = state.referral_depth + 1
-                        made_progress = True
-                        break
-
-                    # 4B. Referral without glue.
-                    log.info('referral without glue, start NS-name A lookup')
-
-                    state.current_question = NL_handler.start_no_glue_lookup(
-                        state.current_question,
-                        referral
-                    )
-                    state.current_servers = self._get_rootServer_ips()
-                    state.referral_depth = state.referral_depth + 1
-                    made_progress = True
+                    candidateServer_IPs = self._get_rootServer_ips()
+                    moved_to_next_step = True
                     break
 
-                # useless response, try next server at same level
+                # authoritative NODATA
+                if self.response_analyser.is_authoritative_nodata(
+                    response,
+                    current_question
+                ):
+                    log.info('authoritative NODATA for {}'.format(
+                        current_question.qname
+                    ))
+                    return DDT.resolutionResult_S(
+                        cname_chain,
+                        response.authority,
+                        response.additional,
+                        DDT.flag_respondCode_ENUM.NOERROR
+                    )
+
+                # referral
+                referral = self.response_analyser.find_referral(response)
+
+                if referral is None:
+                    log.debug('no useful data from {}'.format(server_ip))
+                    continue
+
+                # following one referral uses referral budget
+                if not self._consume_referral(context):
+                    return self._servfail()
+
+                if len(referral.glue_ips) > 0:
+                    log.info('referral with glue, move to next servers')
+                    log.debug('glue servers: \n{}'.format(
+                        referral.glue_ips
+                    ))
+
+                    candidateServer_IPs = referral.glue_ips
+                    moved_to_next_step = True
+                    break
+
+                nextCandidateServer_IPs: list[str] = self._resolve_nameServer_ips(
+                    referral.ns_names,
+                    current_question.qclass,
+                    context
+                )
+
+                if len(nextCandidateServer_IPs) > 0:
+                    log.info('NS-name lookup success, move to next servers')
+                    log.debug('next candidate server IPs: \n{}'.format(
+                        nextCandidateServer_IPs
+                    ))
+
+                    candidateServer_IPs = nextCandidateServer_IPs
+                    moved_to_next_step = True
+                    break
+
+                # unusable referral, try next candidate at current level
+                log.debug('referral has no usable server address')
+
+            if moved_to_next_step:
                 continue
 
-            if made_progress:
-                log.debug('progress made, continue next round')
-                continue
-
-            # 3. Current round failed.
-            # If it was no-glue NS-name lookup, try next NS name.
-            has_next, next_question = NL_handler.try_next_ns_name()
-
-            if has_next:
-                log.info('try next NS-name A lookup {}'.format(next_question.qname))
-                state.current_question = next_question
-                state.current_servers = self._get_rootServer_ips()
-                continue
-
-            log.warn('no useful response and no next NS name, SERVFAIL')
+            log.warn('all candidate servers failed')
             return self._servfail()
+
+    def resolve(self,
+                question: DDT.a_question_S
+                ) -> DDT.resolutionResult_S:
+        """main iterative resolver entrance"""
+
+        log.info('start resolve {} type {}'.format(
+            question.qname,
+            question.qtype
+        ))
+
+        # set up all limitations
+        context = resolveContext_DC(
+            attempt_counter=0,
+            referral_counter=0,
+            start_time=time.time(),
+            total_time=min(30, 50 * self.timeout)
+        )
+
+
+        result = self._resolve_question(question, context)
+
+        log.debug('resolve finished, attempts={}, referrals={}'.format(
+            context.attempt_counter,
+            context.referral_counter
+        ))
+
+        return result
