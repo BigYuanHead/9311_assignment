@@ -13,7 +13,7 @@ from src.helpers.flagOpt import dnsFlag_C as FO
 import dataStructures.dns_dataTypes as DDT
 
 
-log = myL.logger_C('', debug=Gcfg.LOGGER_DEBUG)
+log = myL.logger_C('', debug=Gcfg.REQUEST_PARSER_DEBUG)
 
 class malformedPkg_E(Exception):
     """DNS packet format is malformed."""
@@ -98,6 +98,7 @@ class dnsParser_C:
         self.request = DDT.dns_request_S()
         self.request.is_malformed = False
         self.request.malformed_reason = ''
+        log.debug("parser created, packet size = {} bytes".format(len(self.data)))
     
 
     def _check_pos(self, pos: int):
@@ -122,6 +123,7 @@ class dnsParser_C:
             tmp_pos = self.pointer
         else:
             tmp_pos = start_pos
+        log.debug(f"decode name start_pos={start_pos}, tmp_pos={tmp_pos}")
 
         labels = []
         visited_offsets = set() # log visited offsets
@@ -149,15 +151,18 @@ class dnsParser_C:
                 tmp_pos = tmp_pos + 1
 
                 pointer_jumpTo = ((length & 0x3F) << 8) | second_byte
+                log.debug(f"DNS compression pointer from {tmp_pos-2} go to {pointer_jumpTo}")
 
                 # avoid pointer loop
                 if pointer_jumpTo in visited_offsets:
+                    log.warn(f"DNS name pointer loop detected, at offset: {pointer_jumpTo}")
                     raise malformedPkg_E.pointer_loop()
                 visited_offsets.add(pointer_jumpTo)
 
                 # count jump times
                 pointerJump_counter = pointerJump_counter + 1
                 if pointerJump_counter > Gcfg.MAXIMUM_POINTER_JUMP:
+                    log.warn(f"too many DNS pointer jump times: {pointerJump_counter}")
                     raise malformedPkg_E.too_many_pointer_jumps()
 
                 if not jumped:
@@ -169,10 +174,12 @@ class dnsParser_C:
 
             # label forms start with 01 or 10
             if length & 0xC0 != 0:
+                log.warn(f"reserved DNS label from at offsest: {tmp_pos-1}, byte: {length:02x}")
                 raise malformedPkg_E.reserved_label_form()
 
             # normal label length check
             if length > Gcfg.MAXIMUM_LABEL_LENGTH:
+                log.warn(f"DNS label too long at offset: {tmp_pos-1}, byte: {length}")
                 raise malformedPkg_E.label_too_long()
 
             self._check_range(tmp_pos, length)
@@ -189,10 +196,12 @@ class dnsParser_C:
             name = '.'.join(labels) + '.'
 
         if len(name) > Gcfg.FULL_NAME_LENGTH:
+            log.warn(f"DNS name too long, length: {len(name)}")
             raise malformedPkg_E.name_too_long()
 
         if start_pos is None:
             self.pointer = next_pos
+        log.debug(f"decode name: {name}, next_pos={next_pos}")
 
         return name, next_pos
 
@@ -214,6 +223,14 @@ class dnsParser_C:
         _header.arCount, _np = self.bo.read_u16(_np)
 
         self.pointer = _np # update
+        log.debug(f"header parsed: \
+                  id={_header.id}, \
+                  flags={_header.flag_readable}, \
+                    qd={_header.qdCount}, \
+                    an={_header.anCount}, \
+                    ns={_header.nsCount}, \
+                    ar={_header.arCount}, \
+                        ")
 
 
     def _parse_question(self) -> DDT.a_question_S:
@@ -225,6 +242,11 @@ class dnsParser_C:
 
         self.pointer = _np # update
 
+        log.debug(f"question parsed: \
+                  qname={qname}, \
+                    qtype={qtype}, \
+                        qclass={qclass}, \
+                        ")
         return DDT.a_question_S(qname, qtype, qclass)
 
 
@@ -234,6 +256,8 @@ class dnsParser_C:
                           rdata_start: int
                           )-> str:
         """ decode one record data """
+
+        log.debug(f"parse rdata, rr_type={rr_type}, rdlength={rdlength}, rdata_start={rdata_start}")
 
         # A
         if rr_type == DDT.dnsType_ENUM.A and rdlength == 4: #4 bytes
@@ -262,6 +286,7 @@ class dnsParser_C:
                 return '{} {}'.format(preference, exchange)
 
         # unsupported or malformed
+        log.warn(f"??unsupport rdata??")
         return 'RDLENGTH {}'.format(rdlength)
 
 
@@ -292,7 +317,14 @@ class dnsParser_C:
                                        tmp_rr.rdlength,
                                        rdata_start)
         
-
+        log.debug(f"RR parsed: \
+                  name={tmp_rr.name}, \
+                    type={tmp_rr.type}, \
+                        class={tmp_rr.rr_class}, \
+                            ttl={tmp_rr.ttl}, \
+                                rdlength={tmp_rr.rdlength}, \
+                                    rdata={tmp_rr.rdata}"
+                                    )
         return tmp_rr
 
 
@@ -332,7 +364,7 @@ class dnsParser_C:
                 self.request.additional.append(rr)
 
         except malformedPkg_E as e:
-            log.warn(e.reason)
+            log.warn('malformed DNS packet: {}'.format(e.reason))
             malformedPkg_E.set_error_request(self.request, e)
 
 

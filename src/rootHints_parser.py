@@ -1,5 +1,11 @@
 
+import configs.global_cfg as Gcfg
+import src.helpers.myLogger as myL
+
+
 import dataStructures.dns_dataTypes as DDT
+
+log = myL.logger_C('', debug=Gcfg.RESOLVER_DEBUG)
 
 
 class rootHints_C:

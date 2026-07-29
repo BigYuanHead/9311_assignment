@@ -2,6 +2,7 @@
 import sys
 import socket
 
+import configs.global_cfg as Gcfg
 import src.helpers.myLogger as myL
 
 import dataStructures.dns_dataTypes as DDT
@@ -14,7 +15,7 @@ from src import caching
 
 
 
-log = myL.logger_C('RESOLVER', debug=True)
+log = myL.logger_C('', debug=Gcfg.RESOLVER_DEBUG)
 
 
 class resolver_C:
