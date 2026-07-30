@@ -53,7 +53,7 @@ class logger_C:
         return '{}{}{}'.format(color, text, self.RESET)
 
     def _log(self, level, message):
-        if not self.debug_mode:
+        if level == 'DEBUG' and not self.debug_mode:
             return
 
         time_text = self._time_text()

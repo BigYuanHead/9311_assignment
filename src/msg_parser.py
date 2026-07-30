@@ -339,7 +339,7 @@ class dnsParser_C:
             raise malformedPkg_E.invalid_rdata(rr_type)
 
         # unsupported or malformed
-        log.warn(f"??unsupport rdata??")
+        # log.warn(f"unsupport rtype: {rr_type}")
         return 'RDLENGTH {}'.format(rdlength)
 
 

@@ -313,9 +313,9 @@ class iterativeResolver_C:
                         answer_path.records
                     )
 
-                    log.success('final answer found for {} type {}, count={}'.format(
+                    log.success('final answer found for {}, type: {}, count={}'.format(
                         current_question.qname,
-                        current_question.qtype,
+                        DDT.dnsType_ENUM.mapper[current_question.qtype],
                         len(final_answers)
                     ))
 
@@ -390,8 +390,10 @@ class iterativeResolver_C:
 
                 # A. referral contain IPs
                 if len(referral.glue_ips) > 0: 
-                    log.info('referral with glue, move to next servers')
-                    log.debug('glue servers: \n{}'.format(
+                    log.debug("referral with glue, next name servers: \n{}".format(
+                        referral.ns_names
+                    ))
+                    log.debug('glue servers IPs: \n{}'.format(
                         referral.glue_ips
                     ))
 
@@ -431,9 +433,9 @@ class iterativeResolver_C:
                 ) -> DDT.resolutionResult_S:
         """ !!! main iterative resolver entrance !!! """
 
-        log.info('start resolve {} type {}'.format(
+        log.info('start resolve {}, type: {}'.format(
             question.qname,
-            question.qtype
+            DDT.dnsType_ENUM.mapper[question.qtype]
         ))
 
         # init limitations
