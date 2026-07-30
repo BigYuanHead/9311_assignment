@@ -375,7 +375,10 @@ class iterativeResolver_C:
                     )
 
                 ## >>>>>>>>>>>>>>>>> referral >>>>>>>>>>>>>>>>>
-                referral = self.response_analyser.find_referral(response)
+                referral = self.response_analyser.find_referral(
+                    response,
+                    current_question
+                )
 
                 if referral is None:
                     log.debug('no useful data from {}'.format(a_IP))

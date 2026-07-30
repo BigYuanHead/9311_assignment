@@ -1,4 +1,5 @@
 import socket
+import time
 
 import configs.global_cfg as Gcfg
 import src.helpers.myLogger as myL
@@ -26,40 +27,44 @@ class upstreamClient_C:
                         response: DDT.dns_request_S,
                         expected_txid: int,
                         expected_question: DDT.a_question_S
-                        ) -> bool:
-
-        if response.is_malformed:
-            log.debug('malformed response')
-            return False
+                        ) -> tuple[bool, bool]:
+        """
+            return:
+                is_matching, is_usable
+        """
 
         if response.header.id != expected_txid:
             log.debug('txid not match')
-            return False
+            return False, False
 
-        if not FO.is_upstreamResponse_valid(response.header.flags):
-            flags = FO.decode(response.header.flags)
-            log.debug('not expected flags {}'.format(flags))
-            return False
+        if response.is_malformed:
+            log.debug('malformed matching response')
+            return True, False
 
         if len(response.questions) != 1:
             log.debug('question count not 1')
-            return False
+            return True, False
 
         response_question = response.questions[0]
 
         if self._norm_name(response_question.qname) != self._norm_name(expected_question.qname):
             log.debug('qname not match')
-            return False
+            return False, False
 
         if response_question.qtype != expected_question.qtype:
             log.debug('qtype not match')
-            return False
+            return False, False
 
         if response_question.qclass != expected_question.qclass:
             log.debug('qclass not match')
-            return False
+            return False, False
 
-        return True
+        if not FO.is_upstreamResponse_valid(response.header.flags):
+            flags = FO.decode(response.header.flags)
+            log.debug('not expected flags {}'.format(flags))
+            return True, False
+
+        return True, True
 
 
     def ask(self,
@@ -76,33 +81,50 @@ class upstreamClient_C:
         )
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(query_timeout)
+        deadline = time.monotonic() + query_timeout
 
         try:
             sock.sendto(query_bytes, (server_ip, 53))
-            response_data, address = sock.recvfrom(4096)
 
-            # got udp frame
-            source_ip = address[0]
-            source_port = address[1]
+            while True:
+                remaining_time = deadline - time.monotonic()
+                if remaining_time <= 0:
+                    log.warn('timeout from {}'.format(server_ip))
+                    return None
 
-            if source_ip != server_ip:
-                log.debug('wrong source IP {}'.format(source_ip))
-                return None
+                sock.settimeout(remaining_time)
+                response_data, address = sock.recvfrom(4096)
 
-            if source_port != 53:
-                log.debug('wrong source port {}'.format(source_port))
-                return None
+                # got udp frame
+                source_ip = address[0]
+                source_port = address[1]
 
-            # decode dns bin
-            parser = RP.dnsParser_C(data=response_data)
-            response = parser.parse()
+                if source_ip != server_ip:
+                    log.debug('ignore wrong source IP {}'.format(source_ip))
+                    continue
 
-            # check
-            if not self._check_response(response, txid, question):
-                return None
+                if source_port != 53:
+                    log.debug('ignore wrong source port {}'.format(source_port))
+                    continue
 
-            return response
+                # decode dns bin
+                parser = RP.dnsParser_C(data=response_data)
+                response = parser.parse()
+
+                # check
+                is_matching, is_usable = self._check_response(
+                    response,
+                    txid,
+                    question
+                )
+
+                if not is_matching:
+                    continue
+
+                if not is_usable:
+                    return None
+
+                return response
 
         except socket.timeout:
             log.warn('timeout from {}'.format(server_ip))

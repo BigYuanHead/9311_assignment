@@ -35,6 +35,21 @@ class responseAnalyser_C:
     def _norm_name(self, name: str) -> str:
         return name.lower()
 
+    def _is_name_in_zone(self,
+                         name: str,
+                         zone_name: str
+                         ) -> bool:
+        check_name = self._norm_name(name).rstrip('.')
+        check_zone = self._norm_name(zone_name).rstrip('.')
+
+        if check_zone == '':
+            return False
+
+        if check_name == check_zone:
+            return True
+
+        return check_name.endswith('.' + check_zone)
+
     def _get_records(self,
                      records: list[DDT.a_rr_S],
                      name: str,
@@ -193,7 +208,8 @@ class responseAnalyser_C:
 
     def find_referral(
             self,
-            response: DDT.dns_request_S
+            response: DDT.dns_request_S,
+            question: DDT.a_question_S
             ) -> referralResult_DC | None:
         """ chase referral """
 
@@ -205,9 +221,18 @@ class responseAnalyser_C:
 
         ## >>>>>>>>>>>>>>>>> log next level NS AA server >>>>>>>>>>>>>>>>>
         ns_names: list[str] = []
+
         for record in response.authority:
-            if record.rr_type == DDT.dnsType_ENUM.NS:
-                ns_names.append(record.rdata)
+            if record.rr_type != DDT.dnsType_ENUM.NS:
+                continue
+
+            if not self._is_name_in_zone(
+                question.qname,
+                record.name
+            ):
+                continue
+
+            ns_names.append(record.rdata)
 
         if len(ns_names) == 0:
             return None
