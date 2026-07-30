@@ -1,7 +1,7 @@
 import sys
 
 import src.helpers.dnsDisplay as DDSP
-from src.request_parser import dnsParser_C
+from src.msg_parser import dnsParser_C
 
 def main(filename=None):
 

@@ -7,7 +7,7 @@ from src.helpers.flagOpt import dnsFlag_C as FO
 
 import dataStructures.dns_dataTypes as DDT
 
-import src.request_parser as RP
+import src.msg_parser as RP
 import src.iterOpt.upstreamQuery_builder as uQb
 
 

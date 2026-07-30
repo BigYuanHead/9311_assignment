@@ -7,7 +7,7 @@ from contextlib import redirect_stdout
 
 
 # Parser tester for the assignment resource .bin files.
-# It directly uses your request_parser.py and dnsDisplay.py.
+# It directly uses your msg_parser.py and dnsDisplay.py.
 #
 # It does NOT build a DNS response.
 # It only checks whether your parser can correctly parse:
@@ -21,12 +21,12 @@ SRC_DIR = BASE_DIR / 'src'
 RESOURCE_DIR = BASE_DIR / 'dns-assignment-resources'
 
 # Allow both styles used in your files:
-#     import src.request_parser
+#     import src.msg_parser
 #     import dataStructures.dns_dataTypes
 sys.path.insert(0, str(BASE_DIR))
 sys.path.insert(0, str(SRC_DIR))
 
-import src.request_parser as RP
+import src.msg_parser as RP
 import src.helpers.dnsDisplay as DD
 
 

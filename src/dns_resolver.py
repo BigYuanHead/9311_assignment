@@ -1,6 +1,7 @@
 
 import sys
 import socket
+import threading
 
 import configs.global_cfg as Gcfg
 import src.helpers.myLogger as myL
@@ -8,7 +9,7 @@ import src.helpers.myLogger as myL
 import dataStructures.dns_dataTypes as DDT
 
 import src.rootHints_parser as RhP
-import src.request_parser as RP
+import src.msg_parser as RP
 import src.respond_builder as RB
 import src.iterative_resolver as IR
 from src import caching
@@ -52,7 +53,7 @@ class resolver_C:
         )
 
 
-    def _handle_query(self, query_data: bytes):
+    def _handle_query(self, query_data: bytes) -> bytes:
         """
             inbounce query will be processed in here
         """
@@ -114,20 +115,39 @@ class resolver_C:
         )
 
 
-    def start(self):
+    def _handle_client(self,
+                       query_data: bytes,
+                       client_address: tuple[str, int]
+                       ) -> None:
         """
-            bringup multi thread
+            one client query runs in one worker thread
+        """
+
+        try:
+            response_data = self._handle_query(query_data)
+        except Exception as e:
+            log.exception(e)
+
+            parser = RP.dnsParser_C(filename=None, data=query_data)
+            request = parser.parse()
+            response_data = self._build_SERVFAIL(request)
+
+        try:
+            self.sock.sendto(response_data, client_address)
+        except Exception as e:
+            log.exception(e)
+
+
+    def start(self) -> None:
+        """
+            receive query and bring up one worker for each client
         """
         while True:
             query_data, client_address = self.sock.recvfrom(512)
 
-            try:
-                response_data = self._handle_query(query_data)
-            except Exception as e:
-                log.exception(e)
-
-                parser = RP.dnsParser_C(filename=None, data=query_data)
-                request = parser.parse()
-                response_data = self._build_SERVFAIL(request)
-
-            self.sock.sendto(response_data, client_address)
+            worker = threading.Thread(
+                target=self._handle_client,
+                args=(query_data, client_address),
+                daemon=True
+            )
+            worker.start()
