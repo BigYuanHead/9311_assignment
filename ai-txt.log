@@ -1,0 +1,28 @@
+============================================================
+1. Performance testing
+============================================================
+
+Tool:
+OpenAI Codex
+
+Approximate date:
+29/07/2026
+
+Affected components:
+Performance-testing scripts and CSV result aggregation.
+
+What I asked:
+I asked the AI to assist with implementing performance-testing code
+based on the experimental method I designed.
+
+How I used the response:
+I reviewed, modified, integrated and ran the generated code myself.
+I used it to compare sequential and concurrent queries, cold and warm
+cache behaviour, and my resolver with Google Public DNS.
+
+What I changed or rejected:
+I excluded measurements that were outside the assignment requirements.
+
+How I verified it:
+I inspected the CSV output, checked the aggregate calculations and
+analysed the median, P95 and batch-time results included in the report.
