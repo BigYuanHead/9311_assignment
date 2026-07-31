@@ -46,27 +46,27 @@ class iterativeResolver_C:
     def __init__(self,
                  root_hints: RhP.rootHints_C,
                  timeout):
+        
         self.root_hints = root_hints
         self.timeout = int(timeout)
 
+        # global config
         self.max_attempts = Gcfg.MAX_ATTEMPTS
         self.max_referrals = Gcfg.MAX_REFERRALS
-        self.max_cname_depth = Gcfg.MAX_CNAME_DEPTH
+        self.max_cnameDepth = Gcfg.MAX_CNAME_DEPTH
 
         self.upstream_client = UC.upstreamClient_C()
         self.response_analyser = RA.responseAnalyser_C(
-            self.max_cname_depth
+            self.max_cnameDepth
         )
 
     # =========== common helper ===========
-    def _norm_name(self, name: str) -> str:
+    def _norm_name(self, name: str):
         return name.lower()
 
     def _servfail(self) -> DDT.resolutionResult_S:
         return DDT.resolutionResult_S(
-            [],
-            [],
-            [],
+            [], [], [],
             DDT.flag_respondCode_ENUM.SERVFAIL,
             aa=0
         )

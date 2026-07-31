@@ -40,71 +40,63 @@ class resolver_C:
         ## bring up UDP socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(('127.0.0.1', self.listen_port))
-        log.info('Resolver listening on 127.0.0.1:{}'.format(self.listen_port))
+        log.info(f"Resolver listening on 127.0.0.1:{self.listen_port}")
 
 
     def _build_SERVFAIL(self, request: DDT.dns_request_S) -> bytes:
         return self.response_builder.build_response(
-            request,
-            [],
-            [],
-            [],
+            request, [], [], [],
             rcode=DDT.flag_respondCode_ENUM.SERVFAIL
         )
 
 
     def _handle_query(self, query_data: bytes) -> bytes:
-        """
-            inbounce query will be processed in here
-        """
+        """ inbounce query main handler """
 
-        # parse a query
+        # >>>>>>>>>>>>>>> 1. parse and check request >>>>>>>>>>>>>>>
+        ## parse a query
         parser = RP.dnsParser_C(filename=None, data=query_data)
         request = parser.parse()
 
-        # if query malformed or question empty, return SERVFAIL
+        ## if query malformed or empty, return SERVFAIL
         if request.is_malformed or len(request.questions) == 0:
-            log.warn("malformed question")
+            log.warn("Malformed question")
             return self._build_SERVFAIL(request)
 
         question = request.questions[0]
 
-        # unsupported client QTYPE -> SERVFAIL
+        ## unsupported client QTYPE -> SERVFAIL
         if question.qtype not in DDT.dnsType_ENUM.mapper:
-            log.warn(f"question type: {question.qtype} not supported")
+            log.warn(f"Question type: {question.qtype} not supported")
             return self._build_SERVFAIL(request)
 
-        # 1. if root require -> find in local root hints file
+        # >>>>>>>>>>>>>>> 2. is root require? >>>>>>>>>>>>>>>
+        ## root require -> find in local root hints file
         result = self.root_hints.find_local_result(question)
 
         if result is not None:
-            log.success('answer from root hints')
-
-        # root hints can not answer
-        else: 
-            # 2. if Cache?
+            log.success('Answer from root hints')
+        else:
+            # >>>>>>>>>>>>>>> 3. if Cached? >>>>>>>>>>>>>>>
             cached_answers = self.cache.get_chain(question)
-            if cached_answers is not None:
-                log.success('cache hit full chain')
+            if cached_answers is not None: ## YES
+                log.success('Cache hit!')
                 result = DDT.resolutionResult_S(
-                    cached_answers,
-                    [],
-                    [],
+                    cached_answers,[],[],
                     DDT.flag_respondCode_ENUM.NOERROR,
                     aa=0
                 )
-            
-            else:
-                # 3. Iterative resolver
+            else: ## NOT
+                # >>>>>>>>>>>>>>> 4. iterative resolver >>>>>>>>>>>>>>>
                 log.info('NO cache, start iterative resolution')
                 result = self.iterative_resolver.resolve(question)
 
-                # 4. Cache positive answer
+                ## cache positive answer
                 if result.rcode == DDT.flag_respondCode_ENUM.NOERROR and len(result.answers) > 0:
                     self.cache.put_chain(question, result.answers)
                     log.success('answer cached')
 
-        # 5. build response
+        ## build response
         return self.response_builder.build_response(
             request,
             result.answers,
@@ -118,30 +110,26 @@ class resolver_C:
     def _handle_client(self,
                        query_data: bytes,
                        client_address: tuple[str, int]
-                       ) -> None:
-        """
-            one client query runs in one worker thread
-        """
+                       ):
+        """ one worker thread """
 
         try:
             response_data = self._handle_query(query_data)
         except Exception as e:
             log.exception(e)
-
             parser = RP.dnsParser_C(filename=None, data=query_data)
             request = parser.parse()
             response_data = self._build_SERVFAIL(request)
 
         try:
+            ## sent back
             self.sock.sendto(response_data, client_address)
         except Exception as e:
             log.exception(e)
 
 
     def start(self) -> None:
-        """
-            receive query and bring up one worker for each client
-        """
+        """ multi threading """
         while True:
             query_data, client_address = self.sock.recvfrom(512)
 

@@ -9,15 +9,14 @@ class dnsResponseBuilder_C:
     def __init__(self):
         pass
 
-    def _encode_name(self, name):
-        """domain name string -> DNS wire format"""
+    def _encode_name(self, name: str):
+        """ domain name string -> DNS wire format"""
 
         result = bytearray()
 
         if name == '.':
             result.append(0)
             return bytes(result)
-
         parts = name.rstrip('.').split('.')
 
         for part in parts:
@@ -28,13 +27,12 @@ class dnsResponseBuilder_C:
         result.append(0)
         return bytes(result)
 
-    def _encode_ip(self, ip):
-        """IPv4 string -> 4 bytes"""
+    def _encode_ip(self, ip: str):
+        """ IPv4 string -> 4 bytes"""
 
         result = bytearray()
 
         parts = ip.split('.')
-
         for part in parts:
             result.append(int(part))
 
@@ -43,7 +41,7 @@ class dnsResponseBuilder_C:
     def _encode_mx(self, rdata):
         """
         MX rdata format:
-            2 bytes preference
+            2 bytes preference + 
             exchange name
         """
 
@@ -60,6 +58,7 @@ class dnsResponseBuilder_C:
 
 
     def _build_question(self, question):
+        """ a question """
         builder = BO.byteBuilder_C()
 
         builder.add_bytes(self._encode_name(question.qname))
@@ -87,6 +86,7 @@ class dnsResponseBuilder_C:
         return b''
 
     def _build_rr(self, record: DDT.a_rr_S):
+        """ a record """
         builder = BO.byteBuilder_C()
 
         rdata_bytes = self._build_rdata(record.rr_type, record.rdata)
@@ -100,19 +100,18 @@ class dnsResponseBuilder_C:
 
         return builder.get_bytes()
 
-    def build_response(self, 
+    def build_response(self,
                        request: DDT.dns_request_S,
                        answer_records: list[DDT.a_rr_S],
                        authority_records: list[DDT.a_rr_S],
                        additional_records: list[DDT.a_rr_S],
-                       rcode=0,
-                       aa=0):
+                       rcode=0, aa=0
+                       ):
         builder = BO.byteBuilder_C()
 
         flags = FO.make_clientResponse_flags(
             request.header.flags,
-            rcode,
-            aa
+            rcode, aa
         )
 
         builder.add_u16(request.header.id)

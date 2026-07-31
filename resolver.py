@@ -1,5 +1,5 @@
-import sys
 
+import sys
 from src.dns_resolver import resolver_C
 
 

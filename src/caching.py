@@ -21,7 +21,7 @@ class cacheBlock_C:
         now = time.time()
 
         for record in records:
-            # full logical answer can not reuse a TTL=0 link
+            # TTL=0
             if record.ttl <= 0:
                 self.items = []
                 self.is_cacheable = False
@@ -33,12 +33,13 @@ class cacheBlock_C:
 
     def get_valid_records(self) -> list[DDT.a_rr_S] | None:
         result: list[DDT.a_rr_S] = []
-        now = time.time()
 
+        # timer
+        now = time.time()
         for record, expiry in self.items:
             remain_ttl = math.floor(expiry - now)
 
-            # one expired link invalidates the full logical answer
+            # one expired link, drop all logical answers
             if remain_ttl <= 0:
                 return None
 
@@ -74,54 +75,62 @@ class dnsCache_C:
             rr_type: int,
             rr_class: int
             ) -> list[DDT.a_rr_S] | None:
+        """
+            @return
+                a resource recored list - if exist
+                OR
+                None - if not
+        """
         key = self._make_key(name, rr_type, rr_class)
 
-        with self.lock:
+        with self.lock: # lock for multi threading
             if key not in self.cache:
                 return None
 
             entry = self.cache[key]
             records = entry.get_valid_records()
 
-            if records is None:
+            if records is None: # destory expired
                 del self.cache[key]
                 return None
 
             return records
+
 
     def put(self,
             name: str,
             rr_type: int,
             rr_class: int,
             records: list[DDT.a_rr_S]
-            ) -> None:
+            ):
         if len(records) == 0:
             return
 
         entry = cacheBlock_C(records)
 
-        if not entry.is_cacheable:
+        if entry.is_cacheable is False: # TTL=0
             return
-
         key = self._make_key(name, rr_type, rr_class)
 
-        with self.lock:
+        with self.lock: # lock
             self.cache[key] = entry
 
+    
     def put_chain(self,
                   question: DDT.a_question_S,
                   records: list[DDT.a_rr_S]
                   ) -> None:
         """
-            Save full answer chain for original client question.
+            save full answer chain
 
-            Example:
-                client asks: www.a.com A
-                records:
+            e.g.
+                client question: 
+                    www.a.com A
+                I records:
                     www.a.com CNAME real.b.com
                     real.b.com A 1.2.3.4
 
-                cache key should be:
+                cache key using:
                     (www.a.com, A, IN)
         """
         self.put(
@@ -134,10 +143,7 @@ class dnsCache_C:
     def get_chain(self,
                   question: DDT.a_question_S
                   ) -> list[DDT.a_rr_S] | None:
-        """
-        Get full answer chain by original client question.
-        """
-
+        """ get answer in chain """
         return self.get(
             question.qname,
             question.qtype,

@@ -9,9 +9,7 @@ log = myL.logger_C('', debug=Gcfg.RESOLVER_DEBUG)
 
 
 class rootHints_C:
-    """
-        put all root hints records in here
-    """
+    """ put all root hints records """
 
     def __init__(self, filename: str):
         self.filename = filename
@@ -122,7 +120,7 @@ class rootHints_C:
 
 
     def get_rootNS_records(self) -> list[DDT.a_rr_S]:
-        """return root NS records in file order"""
+        """ return root NS records in file order """
 
         result: list[DDT.a_rr_S] = []
         for record in self.ns_records:
@@ -144,7 +142,7 @@ class rootHints_C:
         return result
 
     def find_local_result(self, question: DDT.a_question_S) -> DDT.resolutionResult_S | None:
-        """find local answer from parsed root hints"""
+        """ find local answer from parsed root hints """
 
         answers: list[DDT.a_rr_S] = []
         authority: list[DDT.a_rr_S] = []
@@ -152,7 +150,7 @@ class rootHints_C:
 
         qname = self._norm_name(question.qname)
 
-        # QNAME ., QTYPE NS
+        # QNAME:.  +  QTYPE NS
         if qname == '.' and question.qtype == DDT.dnsType_ENUM.NS:
             answers = self.get_rootNS_records()
 
@@ -169,7 +167,7 @@ class rootHints_C:
                 aa=0
             )
 
-        # QNAME root-server-name, QTYPE A
+        # QNAME: root server name + QTYPE A
         if question.qtype == DDT.dnsType_ENUM.A:
             answers = self.get_records_with_name(question.qname)
 
