@@ -120,9 +120,8 @@ class responseAnalyser_C:
                 current_name,
                 DDT.dnsType_ENUM.CNAME
             )
-
             '''
-                curretn question name, 
+                curretn question name,
                 NO expected qtype FOUND, and NO CNAME ANYMORE
                 e.g.
                     a.example. CNAME b.example. 
@@ -211,7 +210,7 @@ class responseAnalyser_C:
             response: DDT.dns_request_S,
             question: DDT.a_question_S
             ) -> referralResult_DC | None:
-        """ chase referral """
+        """ trace referral """
 
         flags = FO.decode(response.header.flags)
 

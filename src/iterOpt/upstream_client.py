@@ -61,7 +61,7 @@ class upstreamClient_C:
 
         if not FO.is_upstreamResponse_valid(response.header.flags):
             flags = FO.decode(response.header.flags)
-            log.debug('not expected flags {}'.format(flags))
+            log.debug(f'not expected flags: {flags}')
             return True, False
 
         return True, True
@@ -89,7 +89,7 @@ class upstreamClient_C:
             while True:
                 remaining_time = deadline - time.monotonic()
                 if remaining_time <= 0:
-                    log.warn('timeout from {}'.format(server_ip))
+                    log.warn(f'timeout from: {server_ip}')
                     return None
 
                 sock.settimeout(remaining_time)
@@ -100,11 +100,11 @@ class upstreamClient_C:
                 source_port = address[1]
 
                 if source_ip != server_ip:
-                    log.debug('ignore wrong source IP {}'.format(source_ip))
+                    log.debug(f'ignore wrong source IP: {source_ip}')
                     continue
 
                 if source_port != 53:
-                    log.debug('ignore wrong source port {}'.format(source_port))
+                    log.debug(f'ignore wrong source port: {source_port}')
                     continue
 
                 # decode dns bin
@@ -127,7 +127,7 @@ class upstreamClient_C:
                 return response
 
         except socket.timeout:
-            log.warn('timeout from {}'.format(server_ip))
+            log.warn(f'timeout from: {server_ip}')
             return None
         except Exception as e:
             log.exception(e)

@@ -1,7 +1,3 @@
-"""
-    positive answer cache
-    one entry stores one complete logical answer
-"""
 
 
 import math

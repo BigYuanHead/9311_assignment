@@ -1,5 +1,3 @@
-import sys
-import os
 
 # cfg
 import configs.global_cfg as Gcfg
